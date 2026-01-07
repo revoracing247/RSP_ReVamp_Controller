@@ -7,6 +7,12 @@ Date: 10/03/2025
 	V1: designed and working for my old traxxas controller (the grey ones)
 */
 
+/*
+Notes for revisions
+	- Add Battery ADC (can report over BLE)
+	- Add ADC sensing for gamepad USB (to maybe disconnect BLE?)
+*/
+
 // #include <XInput.h>
 // #include <Arduino.h>
 #include <BleGamepad.h>
@@ -23,68 +29,31 @@ Date: 10/03/2025
 // +==============================+
 /*
 	### Wires ###
-	Red    -  +3.3V    - Connected to PCB
-	Green  -  Throttle - 
-	Black  -  Ground   - Connected to PCB
-	Blue   -  Ground   - Connected to PCB
-	Orange -  +3.3V    - Connected to PCB
-	White  -  Steering - 
+	Red    -  +3.3V   
+	Green  -  Throttle
+	Black  -  Ground  
+	Blue   -  Ground  
+	Orange -  +3.3V   
+	White  -  Steering
 
 	### PCB ###
     & Top &
 	P1_1 - Ground     - GND
 	P1_2 - Switch1    - SET
 	P1_3 - Switch2    - MENU
-	P1_4 - DS2_Right  - LED_RED   (53Ω ~60mA needed!) NOTE: SMD 83Ω added to PCB traces
-	P1_5 - DS2_Center - LED_GREEN (53Ω ~60mA needed!) NOTE: SMD 83Ω added to PCB traces
+	P1_4 - DS2_Right  - LED_RED   (53Ω ~60mA needed!)
+	P1_5 - DS2_Center - LED_GREEN (53Ω ~60mA needed!)
 	P1_6 - R2_Center  - STR_TRIM
 	P1_7 - R1_Center  - MULTI_TRIM
 	P1_8 - VDD        - 3.3V
     & Bottom &
 */
 
-// +==============================+
-// |     Arduino Connections      |
-// +==============================+
-/*
-	Conn Color    Name        Arduino  PIN#
-	00 - N/A    - Ground       - GND  - NA  - NA
-	01 - N/A    - +5V          - VDD  - NA  - NA
-	02 - Green  - Throttle     - A0   - 18  - REVOLT_STEER
-	03 - White  - Steering     - A1   - 19  - 
-	04 - N/A    - Throttle-Trm - A2   - 20  - REVOLT_FWDREV
-	05 - N/A    - Steering-Trm - A3   - 21  -
-	
-	06 - Red    - Thumb_Btn   - D2   - 02  - REVOLT_ACCEPT_ITEM
-	07 - N/A    - Set_Btn     - D3   - 03  - REVOLT_BACK_PAUSE
-	08 - N/A    - Menu_Btn    - D4   - 04  - REVOLT_RESET_CAR
-	09 - N/A    - LED_RED     - D5   - 05  - PWM_OUT
-	10 - N/A    - LED_GREEN   - D6   - 06  - PWM_OUT
-	09 - Yellow - Top_Btn     - D7   - 07  - REVOLT_FLIP_CAR
-	10 - Purple - Middle_Btn  - D8   - 08  - REVOLT_HORN
-	11 - Brown  - Bottom_Btn  - D9   - 09  - REVOLT_LOOK_BACK
-*/
-
-// +==============================+
-// |       OLD Wire colors        |
-// +==============================+
-/*
-	Conn Color    Name       Arduino  PIN#
-	0 - Black  - Ground      - GND  - 
-	1 - Brown  - +5V         - 3.3V - 
-	2 - White  - Steer       - A0   - 17
-	3 - Orange - Steer-Trm   - A1   - 16
-	4 - Green  - Throttle    - A2   - 15
-	5 - Blue   - Thottle-Trm - A3   - 14
-	6 - Purple - Switch-NO   - D2   - 02
-	7 - Yellow - Switch_NC   - D3   - 03
-	8 - Red    - Pwr_Swtch   - D4   - 04
-*/
 
 // +==============================+
 // |        XINPUT Buttons        |
 // +==============================+
-
+//      Ble           #   Game-Default     Ble     XINPUT (off by one?)
 #define BUTTON_LOGO   0
 #define BUTTON_A      1
 #define BUTTON_B      2
@@ -100,16 +69,17 @@ Date: 10/03/2025
 #define DPAD_DOWN     12
 #define DPAD_LEFT     13
 #define DPAD_RIGHT    14
-#define TRIGGER_LEFT  15
-#define TRIGGER_RIGHT 16
-#define JOY_LEFT      17
-#define JOY_RIGHT     18
+// #define TRIGGER_LEFT  15
+// #define TRIGGER_RIGHT 16
+// #define JOY_LEFT      17
+// #define JOY_RIGHT     18
 
 // +--------------------------------------------------------------+
 // |                     Compile Time Options                     |
 // +--------------------------------------------------------------+
-#define NEG_AXIS     false // set axis range -32767 to 32767 (Some non-Windows operating systems and web based gamepad testers don't like min axis set below 0, so 0 is set by default)
-#define SIM_CONTROLS false // enable and map throttle/steering to "sim" controls
+#define NEG_AXIS            false // set axis range -32767 to 32767 (Some non-Windows operating systems and web based gamepad testers don't like min axis set below 0, so 0 is set by default)
+#define SIM_CONTROLS        false // enable and map throttle/steering to "sim" controls
+#define FINISHED_CONTROLLER true // changes IO for with/without nose buttons
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -139,30 +109,67 @@ Date: 10/03/2025
 // +--------------------------------------------------------------+
 // |                       Mapping Defines                        |
 // +--------------------------------------------------------------+
+// button number through the library to end device changes depending on some things...
+// +==============================+
+// |    Default REVOLT Mapping    |
+// +==============================+
+//         Action        Windows  Android#  Android      Ble
+// #define Fire          Button_0     1     Button_A      0 
+// #define Flip_Car      Button_1     2     Button_B      0 
+// #define Reposition    Button_2     3     Button_X      0 
+// #define Horn          Button_5     8?    Button_Guide  0 
+// #define Rear_View     Button_4     7     Button_Back   0 
+// #define Change_Camera F1                 F1            0 
+// #define Pause         Button_3     4     Button_Y      0 
 
 // +==============================+
-// |   Re-Volt XINPUT MAapping    |
+// |      Re-Volt BLE Mapping     |
 // +==============================+
-#define REVOLT_HORN        BUTTON_LOGO   // N/A
-#define REVOLT_ACCEPT_ITEM BUTTON_A      // N/A
-#define REVOLT_FLIP_CAR    BUTTON_B      // N/A
-#define REVOLT_RESET_CAR   BUTTON_X      // N/A
-#define REVOLT_BACK_PAUSE  BUTTON_Y      // N/A
-// #define REVOLT_NA0         BUTTON_LB     // N/A
-// #define REVOLT_NA1         BUTTON_RB     // N/A
-#define REVOLT_LOOK_BACK   BUTTON_BACK   // N/A
-// #define REVOLT_NA2         BUTTON_START  // N/A
-// #define REVOLT_NA3         BUTTON_L3     // N/A
-// #define REVOLT_NA4         BUTTON_R3     // N/A
-#define REVOLT_UP          DPAD_UP       // Menu Nav
-#define REVOLT_DOWN        DPAD_DOWN     // Menu Nav
-#define REVOLT_LEFT        DPAD_LEFT     // Menu Nav
-#define REVOLT_RIGHT       DPAD_RIGHT    // Menu Nav
-// #define REVOLT_NA5         TRIGGER_LEFT  // N/A
-// #define REVOLT_NA6         TRIGGER_RIGHT // N/A
-#define REVOLT_FWDREV      JOY_LEFT      // leftYAxis
-#define REVOLT_STEER       JOY_LEFT      // leftXAxis
-// #define REVOLT_NA7         JOY_RIGHT,
+#define BLE_REVOLT_ACCEPT_ITEM 1
+#define BLE_REVOLT_FLIP_CAR    2
+#define BLE_REVOLT_RESET_CAR   3
+#define BLE_REVOLT_BACK_PAUSE  4
+#define BLE_REVOLT_LOOK_BACK   5
+#define BLE_REVOLT_HORN        6
+#define BLE_REVOLT_UP          10 // verify
+#define BLE_REVOLT_DOWN        11 // verify
+#define BLE_REVOLT_LEFT        12 // verify
+#define BLE_REVOLT_RIGHT       13 // verify
+#define BLE_REVOLT_FWDREV      JOY_LEFT
+#define BLE_REVOLT_STEER       JOY_LEFT
+
+// +==============================+
+// |    Re-Volt Android Mapping   |
+// +==============================+ // add android mode?
+#define AND_REVOLT_ACCEPT_ITEM 1
+#define AND_REVOLT_FLIP_CAR    2
+#define AND_REVOLT_RESET_CAR   3
+#define AND_REVOLT_BACK_PAUSE  4
+#define AND_REVOLT_LOOK_BACK   7
+#define AND_REVOLT_HORN        8
+#define AND_REVOLT_UP          10 // verify
+#define AND_REVOLT_DOWN        11 // verify
+#define AND_REVOLT_LEFT        12 // verify
+#define AND_REVOLT_RIGHT       13 // verify
+#define AND_REVOLT_FWDREV      JOY_LEFT
+#define AND_REVOLT_STEER       JOY_LEFT
+
+
+// +==============================+
+// |     Re-Volt USB Mapping      |
+// +==============================+
+#define USB_REVOLT_ACCEPT_ITEM 0
+#define USB_REVOLT_FLIP_CAR    1
+#define USB_REVOLT_RESET_CAR   2
+#define USB_REVOLT_BACK_PAUSE  3
+#define USB_REVOLT_LOOK_BACK   4
+#define USB_REVOLT_HORN        5
+#define USB_REVOLT_UP          10 // verify
+#define USB_REVOLT_DOWN        11 // verify
+#define USB_REVOLT_LEFT        12 // verify
+#define USB_REVOLT_RIGHT       13 // verify
+#define USB_REVOLT_FWDREV      JOY_LEFT
+#define USB_REVOLT_STEER       JOY_LEFT
 
 // +==============================+
 // |            PINOUT            |
@@ -199,58 +206,121 @@ Date: 10/03/2025
 // +==============================+
 // |        Button Mapping        |
 // +==============================+
-#define XIN_THMB_BTN  REVOLT_ACCEPT_ITEM
-#define XIN_MENU_BTN  REVOLT_BACK_PAUSE
-#define XIN_SET_BTN   REVOLT_FLIP_CAR
-#define XIN_TOP_BTN   REVOLT_RESET_CAR
-#define XIN_MID_BTN   REVOLT_HORN
-#define XIN_BTM_BTN   REVOLT_LOOK_BACK
+#if FINISHED_CONTROLLER
+#define USB_THMB_BTN  USB_REVOLT_ACCEPT_ITEM
+#define USB_MENU_BTN  USB_REVOLT_BACK_PAUSE
+#define USB_SET_BTN   USB_REVOLT_RESET_CAR
+#define USB_TOP_BTN   USB_REVOLT_LOOK_BACK
+#define USB_MID_BTN   USB_REVOLT_HORN
+#define USB_BTM_BTN   USB_REVOLT_FLIP_CAR
+#else // NO Nose buttons CONTROLLER
+#define USB_THMB_BTN  USB_REVOLT_ACCEPT_ITEM
+#define USB_MENU_BTN  USB_REVOLT_BACK_PAUSE
+#define USB_SET_BTN   USB_REVOLT_FLIP_CAR
+// #define USB_TOP_BTN   USB_REVOLT_RESET_CAR
+// #define USB_MID_BTN   USB_REVOLT_HORN
+// #define USB_BTM_BTN   USB_REVOLT_LOOK_BACK
+#endif
+
+#if FINISHED_CONTROLLER
+#define BLE_THMB_BTN  BLE_REVOLT_ACCEPT_ITEM
+#define BLE_MENU_BTN  BLE_REVOLT_BACK_PAUSE
+#define BLE_SET_BTN   BLE_REVOLT_RESET_CAR
+#define BLE_TOP_BTN   BLE_REVOLT_LOOK_BACK
+#define BLE_MID_BTN   BLE_REVOLT_HORN
+#define BLE_BTM_BTN   BLE_REVOLT_FLIP_CAR
+#else // NO Nose buttons CONTROLLER
+#define BLE_THMB_BTN  BLE_REVOLT_ACCEPT_ITEM
+#define BLE_MENU_BTN  BLE_REVOLT_BACK_PAUSE
+#define BLE_SET_BTN   BLE_REVOLT_FLIP_CAR
+// #define BLE_TOP_BTN   BLE_REVOLT_RESET_CAR
+// #define BLE_MID_BTN   BLE_REVOLT_HORN
+// #define BLE_BTM_BTN   BLE_REVOLT_LOOK_BACK
+#endif
+
+
 
 // +--------------------------------------------------------------+
 // |                        Controller IDs                        |
 // +--------------------------------------------------------------+
-#define MANF_NAME "RSP"
-// #define MANF_NAME "ReadySetProjects"
-// #define PROD_NAME "RSP Controller"
-
-// #define PROD_NAME "TEST-C3 RC-Gamepad" 0x1234 // Test ESP32-C3
-// #define PROD_NAME "A0148840 RC-Gamepad" // 0x8840 First ESP32-S3 controller
-// #define PROD_NAME "A0392285 RC-Gamepad" // 0x2285 Has throttle adjuster thing
-// #define PROD_NAME "A0381549 RC-Gamepad" // 0x1549
-// #define PROD_NAME "A0381459 RC-Gamepad" // 0x1459
-// #define PROD_NAME "A0359313 RC-Gamepad" // 0x9313
-// #define PROD_NAME "A0359295 RC-Gamepad" // 0x9295
-// #define PROD_NAME "A0306966 RC-Gamepad" // 0x6966
-// #define PROD_NAME "A0306712 RC-Gamepad" // 0x6712
-// #define PROD_NAME "A0148987 RC-Gamepad" // 0x8987 Currently an Arduino controller
-// #define PROD_NAME "A0148750 RC-Gamepad" // 0x8750 // messed up POT
-// #define PROD_NAME "A0329340 RC-Gamepad" // 0x9340 // actual first S3 Controller
-#define PROD_NAME "A0148860 RC-Gamepad" // 0x8860 // First PCB S3 controller
-// #define PROD_NAME "A0350786 RC_Gamepad" // 0x0786
-// #define PROD_NAME "A0243249 RC_Gamepad" // 0x3249
-// #define PROD_NAME "A0337517 RC_Gamepad" // 0x7517
-// #define PROD_NAME "A0337117 RC_Gamepad" // 0x7117
-
-
+#define MANF_NAME "RSP" // "ReadySetProjects"
 #define VENDOR_ID 0xC01B // Colby!
 
-// #define CONTROLLER_ID 0x1234 // Test ESP32-C3
-// #define CONTROLLER_ID 0x8840 // A0148840 First ESP32-S3 controller
-// #define CONTROLLER_ID 0x2285 // A0392285 Has throttle adjuster thing
-// #define CONTROLLER_ID 0x1549 // A0381549
-// #define CONTROLLER_ID 0x1459 // A0381459
-// #define CONTROLLER_ID 0x9313 // A0359313
-// #define CONTROLLER_ID 0x9295 // A0359295
-// #define CONTROLLER_ID 0x6966 // A0306966
-// #define CONTROLLER_ID 0x6712 // A0306712
-// #define CONTROLLER_ID 0x8987 // A0148987 Currently an Arduino controller
-// #define CONTROLLER_ID 0x8750 // A0148750 // Messed Up POT
-// #define CONTROLLER_ID 0x9340 // A0329340 // actual first S3 Controller
-#define CONTROLLER_ID 0x8860 // A0148860 // First PCA S3 Controller
-// #define CONTROLLER_ID 0x0786 // A0350786
-// #define CONTROLLER_ID 0x3249 // A0243249
-// #define CONTROLLER_ID 0x7517 // A0337517
-// #define CONTROLLER_ID 0x7117 // A0337117
+// // TEST ESP32-C3
+// #define PROD_NAME  "TEST-C3 RC-Gamepad" 0x1234
+// #define CONTROLLER_ID 0x1234
+
+// // A0148840 First ESP32-S3 controller
+// #define PROD_NAME  "A0148840 RC-Gamepad"
+// #define CONTROLLER_ID 0x8840
+
+// // A0392285 Has throttle adjuster thing
+// #define PROD_NAME  "A0392285 RC-Gamepad"
+// #define CONTROLLER_ID 0x2285
+
+// // A0381549
+// #define PROD_NAME  "A0381549 RC-Gamepad"
+// #define CONTROLLER_ID 0x1549
+
+// A0381459  First S3 with nose buttons
+#define PROD_NAME  "A0381459 RC-Gamepad"
+#define CONTROLLER_ID 0x1459
+
+// // A0359313
+// #define PROD_NAME  "A0359313 RC-Gamepad"
+// #define CONTROLLER_ID 0x9313
+
+// // A0359295
+// #define PROD_NAME  "A0359295 RC-Gamepad"
+// #define CONTROLLER_ID 0x9295
+
+// // A0306966
+// #define PROD_NAME  "A0306966 RC-Gamepad"
+// #define CONTROLLER_ID 0x6966
+
+// // A0306712
+// #define PROD_NAME  "A0306712 RC-Gamepad"
+// #define CONTROLLER_ID 0x6712
+
+// // A0148987 Currently an Arduino controller
+// #define PROD_NAME  "A0148987 RC-Gamepad"
+// #define CONTROLLER_ID 0x8987
+
+// // A0148750 messed up POT
+// #define PROD_NAME  "A0148750 RC-Gamepad"
+// #define CONTROLLER_ID 0x8750
+
+// // A0329340 actual first S3 Controller
+// #define PROD_NAME  "A0329340 RC-Gamepad"
+// #define CONTROLLER_ID 0x9340 
+
+// // A0148860 First PCB S3 controller
+// #define PROD_NAME  "A0148860 RC-Gamepad"
+// #define CONTROLLER_ID 0x8860
+
+// // A0350786
+// #define PROD_NAME  "A0350786 RC-Gamepad"
+// #define CONTROLLER_ID 0x0786
+
+// // A0243249
+// #define PROD_NAME  "A0243249 RC-Gamepad"
+// #define CONTROLLER_ID 0x3249
+
+// // A0337517
+// #define PROD_NAME  "A0337517 RC-Gamepad"
+// #define CONTROLLER_ID 0x7517
+
+// // A0337117
+// #define PROD_NAME  "A0337117 RC-Gamepad"
+// #define CONTROLLER_ID 0x7117
+
+#ifndef PROD_NAME
+#define PROD_NAME "RSP Controller"
+#endif
+
+#ifndef CONTROLLER_ID
+#define CONTROLLER_ID 0x1234
+#endif
 
 // +--------------------------------------------------------------+
 // |                          Constants                           |
@@ -353,14 +423,6 @@ void setup()
     // timerStart(Timer0_Cfg);
 
 	// +==============================+
-	// |            XInput            |
-	// +==============================+
-	// // put your setup code here, to run once:
-	// XInput.setAutoSend(false);
-	// XInput.begin();
-
-
-	// +==============================+
 	// |            Micro             |
 	// +==============================+
 	pinMode(PIN_STR,       INPUT); // No Pullup for ADC?
@@ -440,7 +502,7 @@ void setup()
 	LastThumbBtn     = !digitalRead(PIN_THMB_BTN);
 	LastMenuBtn      = !digitalRead(PIN_MENU_BTN);
 	LastSetBtn       = !digitalRead(PIN_SET_BTN);
-	// LastTopBtn       = !digitalRead(PIN_TOP_BTN);
+	LastTopBtn       = !digitalRead(PIN_TOP_BTN);
 	LastMidBtn       = !digitalRead(PIN_MID_BTN);
 	LastBtmBtn       = !digitalRead(PIN_BTM_BTN);
 }
@@ -526,7 +588,7 @@ void loop()
 	// +==============================+
 	// |             LEDS             |
 	// +==============================+
-	if(!digitalRead(PIN_SET_BTN))
+	if(!digitalRead(PIN_MID_BTN))
 	{
 		analogWrite(PIN_LED_RED, PWM_LED_MIN);
 		analogWrite(PIN_LED_GREEN, PWM_LED_MIN);
@@ -561,91 +623,31 @@ void loop()
 	}
 
 	// +--------------------------------------------------------------+
-	// |                            XInput                            |
-	// +--------------------------------------------------------------+
-
-	// +==============================+
-	// |           TRIGGERS           |
-	// +==============================+
-	// // Left Trigger - 0
-	// XInput.setTrigger(TRIGGER_LEFT, digitalRead(0) * -255 + 255);
-	// // Right Trigger - 7
-	// XInput.setTrigger(TRIGGER_RIGHT, digitalRead(7) * -255 + 255);
- 
-	// +==============================+
-	// |           Buttons            |
-	// +==============================+
-
-	// #if 0 // FINISHED CONTROLLER
-	// // Left Button - 1
-	// XInput.setButton(REVOLT_ACCEPT_ITEM, !digitalRead(PIN_THMB_BTN));
-	// // Left Button - 1
-	// XInput.setButton(REVOLT_FLIP_CAR, !digitalRead(PIN_BTM_BTN));
-	// // Back Button - 2
-	// XInput.setButton(REVOLT_RESET_CAR, !digitalRead(PIN_SET_BTN));
-	// // Back Button - 2
-	// XInput.setButton(REVOLT_BACK_PAUSE, !digitalRead(PIN_MENU_BTN));
-	// // Back Button - 2
-	// XInput.setButton(REVOLT_LOOK_BACK, !digitalRead(PIN_TOP_BTN));
-	// // Back Button - 2
-	// XInput.setButton(REVOLT_HORN, !digitalRead(PIN_MID_BTN));
-	// #else // NO Nose buttons CONTROLLER
-	// // Left Button - 1
-	// XInput.setButton(REVOLT_ACCEPT_ITEM, !digitalRead(PIN_THMB_BTN));
-	// // Left Button - 1
-	// XInput.setButton(REVOLT_FLIP_CAR, !digitalRead(PIN_SET_BTN));
-	// // Back Button - 2
-	// XInput.setButton(REVOLT_BACK_PAUSE, !digitalRead(PIN_MENU_BTN));
-	// #endif
-	
-	// // Up DPad - 3 Down DPad - 5 Left DPad - 4 Right DPad - 6
-	// XInput.setDpad(!digitalRead(3), !digitalRead(5), !digitalRead(4), !digitalRead(6));
-
-	// +==============================+
-	// |          Joysticks           |
-	// +==============================+
-	// A0, A2 LEFT
-	// RAW
-	// int leftXAxis = (steeringPosition - ADC_HALF) * CONV_MULTI;
-	// int leftYAxis = (XINPUT_MAX - (throttlePosition - ADC_HALF) * CONV_MULTI);
-	// ADJUSTED
-	// int leftXAxis = (adjustedSteering - ADC_HALF) * (XINPUT_MAX/(ADC_MAX+1));
-	// int leftYAxis = (XINPUT_MAX - (adjustedThrottle - ADC_HALF) * CONV_MULTI);
-	// TRIMMED
-	int leftXAxis = (trimmedSteering - ADC_HALF) * (XINPUT_MAX/(ADC_MAX+1));
-	int leftYAxis = (XINPUT_MAX - (trimmedThrottle - ADC_HALF) * CONV_MULTI);
-	// XInput.setJoystick(JOY_LEFT, leftXAxis, leftYAxis);
-
-	// A1, A3 RIGHT
-	// These are trims TODO: implment them to trim digitally (this is just for POC)
-	// int rightXAxis = (steeringTrimPosition - ADC_HALF) * CONV_MULTI;
-	// int rightYAxis = (XINPUT_MAX - (throttleTrimPosition - ADC_HALF) * CONV_MULTI);
-
-	int rightXAxis = mapRange(adjustedSteeringTrim, 0, ADC_MAX, 0, 0x7FFF);
-	int rightYAxis = mapRange(adjustedThrottleTrim, 0, ADC_MAX, 0, 0x7FFF);
-	// XInput.setJoystick(JOY_RIGHT, rightXAxis, rightYAxis);
-
-	// XInput.send();
-	
-	// +--------------------------------------------------------------+
 	// |                         BLE Gamepad                          |
 	// +--------------------------------------------------------------+
     if (bleGamepad.isConnected())
     {
-
-        // Serial.println("Press buttons 5, 16 and start. Move all enabled axes to max. Set DPAD (hat 1) to down right.");
-        if     (!bleGamepad.isPressed(XIN_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (XIN_THMB_BTN); }
-        else if( bleGamepad.isPressed(XIN_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(XIN_THMB_BTN); }
-        if     (!bleGamepad.isPressed(XIN_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (XIN_SET_BTN);  }
-        else if( bleGamepad.isPressed(XIN_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(XIN_SET_BTN);  }
-        if     (!bleGamepad.isPressed(XIN_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (XIN_MENU_BTN); }
-        else if( bleGamepad.isPressed(XIN_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(XIN_MENU_BTN); }
-        // if     (!bleGamepad.isPressed(XIN_TOP_BTN)  && !digitalRead(PIN_TOP_BTN)) { bleGamepad.press  (XIN_TOP_BTN);  }
-        // else if( bleGamepad.isPressed(XIN_TOP_BTN)  &&  digitalRead(PIN_TOP_BTN)) { bleGamepad.release(XIN_TOP_BTN);  }
-        // if     (!bleGamepad.isPressed(XIN_MID_BTN)  && !digitalRead(PIN_MID_BTN)) { bleGamepad.press  (XIN_MID_BTN);  }
-        // else if( bleGamepad.isPressed(XIN_MID_BTN)  &&  digitalRead(PIN_MID_BTN)) { bleGamepad.release(XIN_MID_BTN);  }
-        // if     (!bleGamepad.isPressed(XIN_BTM_BTN)  && !digitalRead(PIN_BTM_BTN)) { bleGamepad.press  (XIN_BTM_BTN);  }
-        // else if( bleGamepad.isPressed(XIN_BTM_BTN)  &&  digitalRead(PIN_BTM_BTN)) { bleGamepad.release(XIN_BTM_BTN);  }
+		#if FINISHED_CONTROLLER
+        if     (!bleGamepad.isPressed(BLE_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (BLE_THMB_BTN); }
+        else if( bleGamepad.isPressed(BLE_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(BLE_THMB_BTN); }
+        if     (!bleGamepad.isPressed(BLE_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (BLE_SET_BTN);  }
+        else if( bleGamepad.isPressed(BLE_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(BLE_SET_BTN);  }
+        if     (!bleGamepad.isPressed(BLE_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (BLE_MENU_BTN); }
+        else if( bleGamepad.isPressed(BLE_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(BLE_MENU_BTN); }
+        if     (!bleGamepad.isPressed(BLE_TOP_BTN)  && !digitalRead(PIN_TOP_BTN)) { bleGamepad.press  (BLE_TOP_BTN);  }
+        else if( bleGamepad.isPressed(BLE_TOP_BTN)  &&  digitalRead(PIN_TOP_BTN)) { bleGamepad.release(BLE_TOP_BTN);  }
+        if     (!bleGamepad.isPressed(BLE_MID_BTN)  && !digitalRead(PIN_MID_BTN)) { bleGamepad.press  (BLE_MID_BTN);  }
+        else if( bleGamepad.isPressed(BLE_MID_BTN)  &&  digitalRead(PIN_MID_BTN)) { bleGamepad.release(BLE_MID_BTN);  }
+        if     (!bleGamepad.isPressed(BLE_BTM_BTN)  && !digitalRead(PIN_BTM_BTN)) { bleGamepad.press  (BLE_BTM_BTN);  }
+        else if( bleGamepad.isPressed(BLE_BTM_BTN)  &&  digitalRead(PIN_BTM_BTN)) { bleGamepad.release(BLE_BTM_BTN);  }
+		#else // NO Nose buttons CONTROLLER
+        if     (!bleGamepad.isPressed(BLE_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (BLE_THMB_BTN); }
+        else if( bleGamepad.isPressed(BLE_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(BLE_THMB_BTN); }
+        if     (!bleGamepad.isPressed(BLE_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (BLE_SET_BTN);  }
+        else if( bleGamepad.isPressed(BLE_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(BLE_SET_BTN);  }
+        if     (!bleGamepad.isPressed(BLE_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (BLE_MENU_BTN); }
+        else if( bleGamepad.isPressed(BLE_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(BLE_MENU_BTN); }
+		#endif
 
 		#if 0
         bleGamepad.setAxes(AXIS_CENTER, AXIS_CENTER, 0, rightXAxis, rightYAxis, 0);       //(X, Y, Z, RX, RY, RZ)
@@ -674,32 +676,22 @@ void loop()
     	// |                         USB Gamepad                          |
     	// +--------------------------------------------------------------+
 
-		#if 0 // FINISHED CONTROLLER
-		// Left Button - 1
-		usbGamepad.setButton(REVOLT_ACCEPT_ITEM, !digitalRead(PIN_THMB_BTN));
-		// Left Button - 1
-		usbGamepad.setButton(REVOLT_FLIP_CAR, !digitalRead(PIN_BTM_BTN));
-		// Back Button - 2
-		usbGamepad.setButton(REVOLT_RESET_CAR, !digitalRead(PIN_SET_BTN));
-		// Back Button - 2
-		usbGamepad.setButton(REVOLT_BACK_PAUSE, !digitalRead(PIN_MENU_BTN));
-		// Back Button - 2
-		usbGamepad.setButton(REVOLT_LOOK_BACK, !digitalRead(PIN_TOP_BTN));
-		// Back Button - 2
-		usbGamepad.setButton(REVOLT_HORN, !digitalRead(PIN_MID_BTN));
-		#else // NO Nose buttons CONTROLLER
-		// Left Button - 1
-		usbGamepad.setButton(REVOLT_ACCEPT_ITEM, !digitalRead(PIN_THMB_BTN));
-		// Left Button - 1
-		usbGamepad.setButton(REVOLT_FLIP_CAR, !digitalRead(PIN_SET_BTN));
-		// Back Button - 2
-		usbGamepad.setButton(REVOLT_BACK_PAUSE, !digitalRead(PIN_MENU_BTN));
+		usbGamepad.setButton(USB_THMB_BTN, !digitalRead(PIN_THMB_BTN));
+		usbGamepad.setButton(USB_SET_BTN,  !digitalRead(PIN_SET_BTN));
+		usbGamepad.setButton(USB_MENU_BTN, !digitalRead(PIN_MENU_BTN));
+		#if FINISHED_CONTROLLER
+		usbGamepad.setButton(USB_TOP_BTN,  !digitalRead(PIN_TOP_BTN));
+		usbGamepad.setButton(USB_MID_BTN,  !digitalRead(PIN_MID_BTN));
+		usbGamepad.setButton(USB_BTM_BTN,  !digitalRead(PIN_BTM_BTN));
 		#endif
 
-		usbGamepad.setXAxis(leftXAxis);
-		usbGamepad.setYAxis(leftYAxis);
-		usbGamepad.setRxAxis(rightXAxis);
-		usbGamepad.setRyAxis(rightYAxis);
+		// +==============================+
+		// |          Joysticks           |
+		// +==============================+
+		usbGamepad.setXAxis(mapRange(trimmedSteering, 0, ADC_MAX, 0, 0x7FFF));
+		usbGamepad.setYAxis(mapRange(trimmedThrottle, 0, ADC_MAX, 0, 0x7FFF));
+		usbGamepad.setRxAxis(mapRange(adjustedSteeringTrim, 0, ADC_MAX, 0, 0x7FFF));
+		usbGamepad.setRyAxis(mapRange(adjustedThrottleTrim, 0, ADC_MAX, 0, 0x7FFF));
 		usbGamepad.sendState();
     }
 }
