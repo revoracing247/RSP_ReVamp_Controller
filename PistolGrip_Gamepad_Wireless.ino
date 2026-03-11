@@ -266,7 +266,7 @@ Notes for revisions
 // #define PROD_NAME  "TEST-C3 RC-Gamepad" 0x1234
 // #define CONTROLLER_ID 0x1234
 
-// // A0148840 ****************************** First ESP32-S3 controller
+// // A0148840 ****************************** First ESP32-S3 controller (now full controller)
 // #define PROD_NAME  "A0148840 RC-Gamepad"
 // #define CONTROLLER_ID 0x8840
 
@@ -274,31 +274,31 @@ Notes for revisions
 // #define PROD_NAME  "A0392285 RC-Gamepad"
 // #define CONTROLLER_ID 0x2285
 
-// A0381549
-#define PROD_NAME  "A0381549 RC-Gamepad"
-#define CONTROLLER_ID 0x1549
+// // A0381549
+// #define PROD_NAME  "A0381549 RC-Gamepad"
+// #define CONTROLLER_ID 0x1549
 
 // // A0381459 ****************************** First S3 with nose buttons
 // #define PROD_NAME  "A0381459 RC-Gamepad"
 // #define CONTROLLER_ID 0x1459
 
-// // A0359313
+// // A0359313 ****************************** now full controller
 // #define PROD_NAME  "A0359313 RC-Gamepad"
 // #define CONTROLLER_ID 0x9313
 
-// // A0359295
+// // A0359295 ****************************** now full controller
 // #define PROD_NAME  "A0359295 RC-Gamepad"
 // #define CONTROLLER_ID 0x9295
 
-// // A0306966
+// // A0306966 ****************************** now full controller
 // #define PROD_NAME  "A0306966 RC-Gamepad"
 // #define CONTROLLER_ID 0x6966
 
-// // A0306712
-// #define PROD_NAME  "A0306712 RC-Gamepad"
-// #define CONTROLLER_ID 0x6712
+// A0306712 ****************************** now full controller
+#define PROD_NAME  "A0306712 RC-Gamepad"
+#define CONTROLLER_ID 0x6712
 
-// // A0148987 ****************************** Currently an Arduino controller
+// // A0148987 ****************************** Currently an Arduino controller (now full controller)
 // #define PROD_NAME  "A0148987 RC-Gamepad"
 // #define CONTROLLER_ID 0x8987
 
@@ -306,7 +306,7 @@ Notes for revisions
 // #define PROD_NAME  "A0148750 RC-Gamepad"
 // #define CONTROLLER_ID 0x8750
 
-// // A0329340 ****************************** First S3 Controller POC
+// // A0329340 ****************************** First S3 Controller POC (now full controller)
 // #define PROD_NAME  "A0329340 RC-Gamepad"
 // #define CONTROLLER_ID 0x9340 
 
@@ -330,6 +330,10 @@ Notes for revisions
 // #define PROD_NAME  "A0337117 RC-Gamepad"
 // #define CONTROLLER_ID 0x7117
 
+// // A0350075  ****************************** S3 POC turned full controller
+// #define PROD_NAME  "A0350075 RC-Gamepad"
+// #define CONTROLLER_ID 0x0075
+
 #ifndef PROD_NAME
 #define PROD_NAME "RSP Controller"
 #endif
@@ -341,13 +345,16 @@ Notes for revisions
 // +--------------------------------------------------------------+
 // |                          Constants                           |
 // +--------------------------------------------------------------+
-#define ADC_MAX      0xFFF // For ESP32-C3 12-Bit (4096 values, ie. 0-4095)
-#define ADC_HALF     ((ADC_MAX+1)/2)
-#define ADC_FILT_LEN 5 // Rolling average length
-#define XINPUT_MAX 0xFFFF // 65536 i.e. 16 bit resolution
-#define XINPUT_MIN -65536 // 16 bit resolution i.e. 0x10000
-#define CONV_MULTI (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
+#define ADC_MAX         0xFFF // For ESP32-C3 12-Bit (4096 values, ie. 0-4095)
+#define ADC_HALF        ((ADC_MAX+1)/2)
+#define ADC_FILT_LEN    5 // Rolling average length
+#define XINPUT_MAX      0xFFFF // 65536 i.e. 16 bit resolution
+#define XINPUT_MIN      -65536 // 16 bit resolution i.e. 0x10000
+#define CONV_MULTI      (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
 #define STARTING_LIMITS 100 // every potentiometer is different so we'll ring the values in a bit to start
+
+#define BAT_LOW_VR1     4.263 // this is when battery voltage starts to affect 3.3v regulated power. Read at regulator input
+#define BAT_LOW_D2      4.484 // this is when battery voltage starts to affect 3.3v regulated power. read before the protection diode
 
 #define PWM_LED_MAX 255
 #define PWM_LED_MIN 0 // LEDs don't turn on till this?
@@ -390,7 +397,7 @@ hw_timer_t *Timer0_Cfg = NULL;
 
 int VibCountdown = 0;
 bool VibActivated = false;
-bool AndroidMode = false;
+bool TriggerMode = false; // throttle and brakes mapped to triggers instead, like a standard controller
 bool VibEnabled = false;
 
 int ThrottleMin = STARTING_LIMITS;
@@ -478,7 +485,7 @@ void setup()
 	// +==============================+
 	if(LastMenuBtn)
 	{
-		AndroidMode = true;
+		TriggerMode = true;
 		// // Activate Vibrator to indicate
 		// VibCountdown = VIB_DURATION;
 		// digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
@@ -670,7 +677,7 @@ void loop()
     if (bleGamepad.isConnected())
     {
 		#if FINISHED_CONTROLLER
-			if(AndroidMode)
+			if(TriggerMode)
 			{
 		        if     (!bleGamepad.isPressed(AND_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (AND_THMB_BTN); }
 		        else if( bleGamepad.isPressed(AND_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(AND_THMB_BTN); }
@@ -701,7 +708,7 @@ void loop()
 		        else if( bleGamepad.isPressed(BLE_BTM_BTN)  &&  digitalRead(PIN_BTM_BTN)) { bleGamepad.release(BLE_BTM_BTN);  }
 		    }
 		#else // NO Nose buttons CONTROLLER
-			if(AndroidMode)
+			if(TriggerMode)
 			{
 		        if     (!bleGamepad.isPressed(AND_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (AND_THMB_BTN); }
 		        else if( bleGamepad.isPressed(AND_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(AND_THMB_BTN); }
