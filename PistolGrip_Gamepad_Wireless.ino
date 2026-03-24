@@ -2,6 +2,7 @@
 Pistol Grip Gamepad
 By: Colby R.
 Date: 10/03/2025
+	V4: Added Battery level reporting
 	V3: redesigned for ESP32-S3 modules
 	V2: designed for TQi 2 channel contrller (the black 2.4GHz ones)
 	V1: designed and working for my old traxxas controller (the grey ones)
@@ -18,7 +19,7 @@ Notes for revisions
 #include <BleGamepad.h>
 #include <Joystick_ESP32S2.h>
 
-#define VERSION_MAJOR 3
+#define VERSION_MAJOR 4
 
 // +--------------------------------------------------------------+
 // |                       Connection Notes                       |
@@ -81,6 +82,7 @@ Notes for revisions
 #define SIM_CONTROLS        false // enable and map throttle/steering to "sim" controls
 #define FINISHED_CONTROLLER true // changes IO for with/without nose buttons
 #define PRINTOUTS           false
+#define BATT_LEVEL          true // report battery level using voltage divider mod
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -266,75 +268,75 @@ Notes for revisions
 #define VENDOR_ID 0xC01B // Colby!
 
 // // TEST ESP32-C3
-// #define PROD_NAME  "TEST-C3 RC-Gamepad" 0x1234
+// #define PROD_NAME  "TEST-C3 Re-Vamp" 0x1234
 // #define CONTROLLER_ID 0x1234
 
 // // A0148840 ****************************** First ESP32-S3 controller (now full controller)
-// #define PROD_NAME  "A0148840 RC-Gamepad"
+// #define PROD_NAME  "A0148840 Re-Vamp"
 // #define CONTROLLER_ID 0x8840
 
 // // A0392285 ****************************** Has throttle adjuster thing
-// #define PROD_NAME  "A0392285 RC-Gamepad"
+// #define PROD_NAME  "A0392285 Re-Vamp"
 // #define CONTROLLER_ID 0x2285
 
 // // A0381549
-// #define PROD_NAME  "A0381549 RC-Gamepad"
+// #define PROD_NAME  "A0381549 Re-Vamp"
 // #define CONTROLLER_ID 0x1549
 
-// // A0381459 ****************************** First S3 with nose buttons
-// #define PROD_NAME  "A0381459 RC-Gamepad"
+// // A0381459 ****************************** First S3 with nose buttons (has Battery Mod)
+// #define PROD_NAME  "A0381459 Re-Vamp"
 // #define CONTROLLER_ID 0x1459
 
 // // A0359313 ****************************** now full controller
-// #define PROD_NAME  "A0359313 RC-Gamepad"
+// #define PROD_NAME  "A0359313 Re-Vamp"
 // #define CONTROLLER_ID 0x9313
 
 // // A0359295 ****************************** now full controller
-// #define PROD_NAME  "A0359295 RC-Gamepad"
+// #define PROD_NAME  "A0359295 Re-Vamp"
 // #define CONTROLLER_ID 0x9295
 
 // // A0306966 ****************************** now full controller
-// #define PROD_NAME  "A0306966 RC-Gamepad"
+// #define PROD_NAME  "A0306966 Re-Vamp"
 // #define CONTROLLER_ID 0x6966
 
 // // A0306712 ****************************** now full controller
-// #define PROD_NAME  "A0306712 RC-Gamepad"
+// #define PROD_NAME  "A0306712 Re-Vamp"
 // #define CONTROLLER_ID 0x6712
 
-// // A0148987 ****************************** Currently an Arduino controller (now full controller)
-// #define PROD_NAME  "A0148987 RC-Gamepad"
+// // A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
+// #define PROD_NAME  "A0148987 Re-Vamp"
 // #define CONTROLLER_ID 0x8987
 
 // // A0148750 ****************************** messed up POT
-// #define PROD_NAME  "A0148750 RC-Gamepad"
+// #define PROD_NAME  "A0148750 Re-Vamp"
 // #define CONTROLLER_ID 0x8750
 
-// // A0329340 ****************************** First S3 Controller POC (now full controller)
-// #define PROD_NAME  "A0329340 RC-Gamepad"
-// #define CONTROLLER_ID 0x9340 
+// A0329340 ****************************** First S3 Controller POC (now full controller) (has Battery Mod)
+#define PROD_NAME  "A0329340 Re-Vamp"
+#define CONTROLLER_ID 0x9340 
 
 // // A0148860 ****************************** First PCB S3 controller
-// #define PROD_NAME  "A0148860 RC-Gamepad"
+// #define PROD_NAME  "A0148860 Re-Vamp"
 // #define CONTROLLER_ID 0x8860
 
 // // A0350786
-// #define PROD_NAME  "A0350786 RC-Gamepad"
+// #define PROD_NAME  "A0350786 Re-Vamp"
 // #define CONTROLLER_ID 0x0786
 
 // // A0243249
-// #define PROD_NAME  "A0243249 RC-Gamepad"
+// #define PROD_NAME  "A0243249 Re-Vamp"
 // #define CONTROLLER_ID 0x3249
 
 // // A0337517
-// #define PROD_NAME  "A0337517 RC-Gamepad"
+// #define PROD_NAME  "A0337517 Re-Vamp"
 // #define CONTROLLER_ID 0x7517
 
 // // A0337117
-// #define PROD_NAME  "A0337117 RC-Gamepad"
+// #define PROD_NAME  "A0337117 Re-Vamp"
 // #define CONTROLLER_ID 0x7117
 
-// // A0350075  ****************************** S3 POC turned full controller
-// #define PROD_NAME  "A0350075 RC-Gamepad"
+// // A0350075  ****************************** S3 POC turned full controller (has Battery Mod)
+// #define PROD_NAME  "A0350075 Re-Vamp"
 // #define CONTROLLER_ID 0x0075
 
 #ifndef PROD_NAME
@@ -357,21 +359,25 @@ Notes for revisions
 #define CONV_MULTI      (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
 #define STARTING_LIMITS 100 // every potentiometer is different so we'll ring the values in a bit to start
 
-// +==============================+
-// |        Batt Terminals        |
-// +==============================+
-#define BATT_FILT_LEN    10 // Rolling average length
-#define BATT_ADC_OFFSET  0.1 // where is this coming from?
-#define BATT_RHIGH       221000 // Reistor in voltage devider network
-#define BATT_RLOW        100000 // Reistor in voltage devider network
-#define BATT_CONV_ADJ    0.370  // need to adjust the conversion?
-#define BATT_CONVERSION  (((BATT_RHIGH + BATT_RLOW * 1.0) / BATT_RLOW) + BATT_CONV_ADJ) // multiplier to conver to voltagealc
-#define BATT_MAX_V       (ADC_MAX_V * BATT_CONVERSION) // actual voltage the ADC can read
-#define BAT_LOW_VR1      4.263 // this is when battery voltage starts to affect 3.3v regulated power. Read at regulator input
-#define BAT_NO_NOISE_VR1 4.404 // Below this is when power rail sag from transmits starts to become noticable
-#define BAT_LOW_D2       4.484 // Below this is when battery voltage starts to affect 3.3v regulated power. read before the protection diode
-#define BAT_NO_NOISE_D2  4.650 // Below this is when power rail sag from transmits starts to become noticable
-#define BAT_NO_V         1.000 // Above this there is battery voltgae present
+#if BATT_LEVEL
+	// +==============================+
+	// |       Battery Defines        |
+	// +==============================+
+	#define BATT_FILT_LEN    10 // Rolling average length
+	#define BATT_ADC_OFFSET  ((ADC_MAX / ADC_MAX_V) * 0.2) // where is this coming from? (Apply pre-upscaling) (in volts)
+	#define BATT_RHIGH       221000 // Reistor in voltage devider network
+	#define BATT_RLOW        100000 // Reistor in voltage devider network
+	#define BATT_CONV_ADJ    0.000  // need to adjust the conversion? (actually not needed after adjusting pre conversion value?)
+	#define BATT_CONVERSION  (((BATT_RHIGH + BATT_RLOW * 1.0) / BATT_RLOW) + BATT_CONV_ADJ) // multiplier to conver to voltagealc
+	#define BATT_MAX_V       (ADC_MAX_V * BATT_CONVERSION) // actual voltage the ADC can read
+	#define BAT_LOW_VR1      4.263 // this is when battery voltage starts to affect 3.3v regulated power. Read at regulator input
+	#define BAT_NO_NOISE_VR1 4.404 // Below this is when power rail sag from transmits starts to become noticable
+	#define BAT_LOW_D2       4.484 // Below this is when battery voltage starts to affect 3.3v regulated power. read before the protection diode
+	#define BAT_NO_NOISE_D2  4.650 // Below this is when power rail sag from transmits starts to become noticable
+	#define BAT_NO_V         3.600 // Above this there is battery voltage present (when positive disconnected input floats to ~3.3V)
+	#define BAT_FULL_D2      6.600 // Batteries full (100% battery) (Alkaline. Lithium will be higher)
+	#define BAT_FLASH_PERIOD 500 // ms
+#endif
 
 #define PWM_LED_MAX 255
 #define PWM_LED_MIN 0 // LEDs don't turn on till this?
@@ -433,7 +439,7 @@ int  LastSteeringTrim = 0;
 int  LastThrottleTrim = 0;
 int  LastSteering     = 0;
 int  LastThrottle     = 0;
-int  LastBattery      = 0;
+
 bool LastThumbBtn     = false;
 bool LastMenuBtn      = false;
 bool LastSetBtn       = false;
@@ -445,7 +451,13 @@ uint AdcBufferThrottle[ADC_FILT_LEN] = {0};
 uint AdcBufferSteering[ADC_FILT_LEN] = {0};
 uint AdcBufferSteeringTrim[ADC_FILT_LEN] = {0};
 uint AdcBufferThrottleTrim[ADC_FILT_LEN] = {0};
+
+#if BATT_LEVEL
+int  LastBattery = 0;
 uint AdcBufferBattery[BATT_FILT_LEN] = {0};
+int  BatteryFlashCountdown = 0;
+bool BatteryFlashState = false;
+#endif
 
 // +--------------------------------------------------------------+
 // |                         Timer 0 ISR                          |
@@ -454,6 +466,7 @@ void IRAM_ATTR Timer0_ISR()
 {
 	if(VibCountdown > 0) { VibCountdown --; }
 	if(PrintCountdown > 0) { PrintCountdown --; }
+	if(BatteryFlashCountdown > 0) { BatteryFlashCountdown --; }
 }
 
 // +--------------------------------------------------------------+
@@ -477,7 +490,9 @@ void setup()
 	pinMode(PIN_STR_TRM,   INPUT); // No Pullup for ADC?
 	pinMode(PIN_THT,       INPUT); // No Pullup for ADC?
 	pinMode(PIN_THT_TRM,   INPUT); // No Pullup for ADC?
+	#if BATT_LEVEL
 	pinMode(PIN_BATT_ADC,  INPUT); // No Pullup for ADC?
+	#endif
 	pinMode(PIN_THMB_BTN,  INPUT_PULLUP);
 	pinMode(PIN_MENU_BTN,  INPUT_PULLUP);
 	pinMode(PIN_SET_BTN,   INPUT_PULLUP);
@@ -497,7 +512,9 @@ void setup()
 	LastThrottleTrim = analogRead(PIN_STR_TRM);
 	LastSteering     = analogRead(PIN_STR);
 	LastThrottle     = analogRead(PIN_THT);
+	#if BATT_LEVEL
 	LastBattery      = analogRead(PIN_BATT_ADC);
+	#endif
 	LastThumbBtn     = !digitalRead(PIN_THMB_BTN);
 	LastMenuBtn      = !digitalRead(PIN_MENU_BTN);
 	LastSetBtn       = !digitalRead(PIN_SET_BTN);
@@ -589,6 +606,14 @@ int mapRange(int numIn, int minIn, int maxIn, int minOut, int maxOut)
     return (int)((((float)(numIn - minIn) / (maxIn - minIn)) * (maxOut - minOut)) + minOut);
 }
 
+float mapRangeFloat(float numIn, float minIn, float maxIn, float minOut, float maxOut)
+{
+    if (maxIn - minIn == 0.0) { return 0.0; } // Input range cannot be zero.
+    if (numIn <= minIn) { return minOut; }
+    if (numIn >= maxIn) { return maxOut; }
+    return ((((numIn - minIn) / (maxIn - minIn)) * (maxOut - minOut)) + minOut);
+}
+
 uint AverageAdc(int adcIn, uint *buffer, int len)
 {
 	int bIndex = 0;
@@ -615,7 +640,9 @@ void loop()
 	int steeringPosition = AverageAdc(analogRead(PIN_STR), AdcBufferThrottle, ADC_FILT_LEN); // NOTE: 12 bit ADC (0-4095)
 	int throttleTrimPosition = AverageAdc(analogRead(PIN_THT_TRM), AdcBufferSteeringTrim, ADC_FILT_LEN); // NOTE: 12 bit ADC (0-4095)
 	int steeringTrimPosition = AverageAdc(analogRead(PIN_STR_TRM), AdcBufferThrottleTrim, ADC_FILT_LEN); // NOTE: 12 bit ADC (0-4095)
+	#if BATT_LEVEL
 	float batteryLevel = GetBattVoltageFromAdc(AverageAdc(analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET, AdcBufferBattery, BATT_FILT_LEN)); // NOTE: 12 bit ADC (0-4095)
+	#endif
 
 	if(ThrottleMin > throttlePosition) { ThrottleMin = throttlePosition; }
 	if(ThrottleMax < throttlePosition) { ThrottleMax = throttlePosition; }
@@ -674,16 +701,15 @@ void loop()
 		if(PrintCountdown == 0)
 		{
 			PrintCountdown = PRINT_PERIOD;
-			Serial.print("Con: ");
-			Serial.print(BATT_CONVERSION, 2);
-			Serial.print(" Max: ");
-			Serial.print(BATT_MAX_V);
-			Serial.print(" Raw: ");
-			Serial.print(analogRead(PIN_BATT_ADC));
-			Serial.print(" Vol: ");
-			Serial.print((analogRead(PIN_BATT_ADC) * (ADC_MAX_V / 4095.0)) + BATT_ADC_OFFSET, 4);
-			Serial.print(" Bat: ");
-			Serial.println(batteryLevel, 4);
+			#if BATT_LEVEL
+				Serial.print("BATT ");
+				Serial.print(mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 99.0));
+				Serial.print("% ");
+				Serial.print(batteryLevel, 4);
+				Serial.print(" V (");
+				Serial.print((analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET) * (ADC_MAX_V/ADC_MAX), 4);
+				Serial.println(" V)");
+			#endif
 		}
 	#endif
 
@@ -691,22 +717,44 @@ void loop()
 	// |             LEDS             |
 	// +==============================+
 	// if(!digitalRead(PIN_MID_BTN))
-	if(batteryLevel > 2.0 && batteryLevel < 4.6) // Low battery voltage!
-	{
-		analogWrite(PIN_LED_RED,   ((PWM_LED_MAX - PWM_LED_MIN)/2));
-		analogWrite(PIN_LED_GREEN, ((PWM_LED_MAX - PWM_LED_MIN)/2));
-		// analogWrite(PIN_LED_RED,   mapRange(batteryLevel, 0, BATT_MAX_V, PWM_LED_MIN, PWM_LED_MAX));
-		// analogWrite(PIN_LED_GREEN, mapRange(ADC_MAX - analogRead(PIN_BATT_ADC), 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-	}
-	// else if(batteryLevel > 2.0) // Low battery voltage!
-	// {
-	// 	analogWrite(PIN_LED_RED,   ((PWM_LED_MAX - PWM_LED_MIN)/2));
-	// 	analogWrite(PIN_LED_GREEN, ((PWM_LED_MAX - PWM_LED_MIN)/2));
-	// 	// analogWrite(PIN_LED_RED,   mapRange(batteryLevel, 0, BATT_MAX_V, PWM_LED_MIN, PWM_LED_MAX));
-	// 	// analogWrite(PIN_LED_GREEN, mapRange(ADC_MAX - analogRead(PIN_BATT_ADC), 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-	// }
-	else
-	{
+	#if BATT_LEVEL
+		if(batteryLevel >= BAT_NO_V && batteryLevel <= BAT_NO_NOISE_D2) // Low battery voltage! flash LEDs (red only?)
+		{
+			if(BatteryFlashCountdown == 0)
+			{
+				BatteryFlashCountdown = BAT_FLASH_PERIOD;
+				BatteryFlashState = !BatteryFlashState;
+				if(!BatteryFlashState) // turn LEDs off
+				{
+					#if PRINTOUTS
+						Serial.println("Turning LEDS off");
+					#endif
+					analogWrite(PIN_LED_RED,   PWM_LED_MAX);
+					analogWrite(PIN_LED_GREEN, PWM_LED_MAX);
+				}
+			}
+			if(BatteryFlashState) // Control LEDs like normal
+			{
+				analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+				analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+			}
+			// analogWrite(PIN_LED_RED,   ((PWM_LED_MAX - PWM_LED_MIN)/2));
+			// analogWrite(PIN_LED_GREEN, ((PWM_LED_MAX - PWM_LED_MIN)/2));
+			// analogWrite(PIN_LED_RED,   mapRange(batteryLevel, 0, BATT_MAX_V, PWM_LED_MIN, PWM_LED_MAX));
+			// analogWrite(PIN_LED_GREEN, mapRange(ADC_MAX - analogRead(PIN_BATT_ADC), 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+		}
+		else
+		{
+			#if 0 // LEDs based off Trim
+			analogWrite(PIN_LED_RED,   mapRange(adjustedThrottleTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+			analogWrite(PIN_LED_GREEN, mapRange(adjustedSteeringTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+			#else // LEDs based off throttle/stering
+			analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+			analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+			#endif
+		}
+
+	#else
 		#if 0 // LEDs based off Trim
 		analogWrite(PIN_LED_RED,   mapRange(adjustedThrottleTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		analogWrite(PIN_LED_GREEN, mapRange(adjustedSteeringTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
@@ -714,8 +762,7 @@ void loop()
 		analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		#endif
-	}
-
+	#endif
 	// +==============================+
 	// |           Vibrator           |
 	// +==============================+
@@ -792,23 +839,38 @@ void loop()
 		#endif
 
 		#if 0
-        bleGamepad.setAxes(AXIS_CENTER, AXIS_CENTER, 0, rightXAxis, rightYAxis, 0);       //(X, Y, Z, RX, RY, RZ)
+	        bleGamepad.setAxes(AXIS_CENTER, AXIS_CENTER, 0, rightXAxis, rightYAxis, 0);       //(X, Y, Z, RX, RY, RZ)
         #else
-        bleGamepad.setX(mapRange(trimmedSteering, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-	    bleGamepad.setY(mapRange(trimmedThrottle, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-	    bleGamepad.setRX(mapRange(adjustedSteeringTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-	    bleGamepad.setRY(mapRange(adjustedThrottleTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+	        bleGamepad.setX(mapRange(trimmedSteering, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+		    bleGamepad.setY(mapRange(trimmedThrottle, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+		    bleGamepad.setRX(mapRange(adjustedSteeringTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+		    bleGamepad.setRY(mapRange(adjustedThrottleTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
         #endif
         // bleGamepad.setAxes(leftXAxis, leftYAxis, 0, rightXAxis, rightYAxis, 0);       //(X, Y, Z, RX, RY, RZ)
 		
 		#if SIM_CONTROLS
-		// +==============================+
-		// |         Sim Controls         |
-		// +==============================+
-	    bleGamepad.setSteering(mapRange(trimmedSteering, 0, ADC_MAX, SIM_MIN, SIM_MAX));
-	    bleGamepad.setBrake(mapRange(trimmedThrottle, ADC_HALF, ADC_MAX, SIM_MIN, SIM_MAX)); // TODO: verify this is mapped correctly
-	    bleGamepad.setAccelerator(mapRange(trimmedThrottle, 0, ADC_HALF, SIM_MIN, SIM_MAX)); // TODO: verify this is mapped correctly
+			// +==============================+
+			// |         Sim Controls         |
+			// +==============================+
+		    bleGamepad.setSteering(mapRange(trimmedSteering, 0, ADC_MAX, SIM_MIN, SIM_MAX));
+		    bleGamepad.setBrake(mapRange(trimmedThrottle, ADC_HALF, ADC_MAX, SIM_MIN, SIM_MAX)); // TODO: verify this is mapped correctly
+		    bleGamepad.setAccelerator(mapRange(trimmedThrottle, 0, ADC_HALF, SIM_MIN, SIM_MAX)); // TODO: verify this is mapped correctly
         #endif
+
+		#if BATT_LEVEL
+	    	// +==============================+
+			// |           Battery            |
+			// +==============================+
+			if(batteryLevel >= BAT_NO_V) // we do have battery power! likely runnig on battery
+			{
+				bleGamepad.setBatteryLevel(mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 100.0)); // map voltage to percentage
+			}
+			else // we're running code so likely USB powered (report 100% to have windows hide battery level)
+			{
+				bleGamepad.setBatteryLevel(101);
+			}
+		#endif
+
 
         bleGamepad.sendReport();
     }
