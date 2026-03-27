@@ -81,7 +81,7 @@ Notes for revisions
 #define NEG_AXIS            false // set axis range -32767 to 32767 (Some non-Windows operating systems and web based gamepad testers don't like min axis set below 0, so 0 is set by default)
 #define SIM_CONTROLS        false // enable and map throttle/steering to "sim" controls
 #define FINISHED_CONTROLLER true // changes IO for with/without nose buttons
-#define PRINTOUTS           false
+#define PRINTOUTS           true
 #define BATT_LEVEL          true // report battery level using voltage divider mod
 
 // BLE_Gamepad_Config
@@ -311,9 +311,9 @@ Notes for revisions
 // #define PROD_NAME  "A0148750 Re-Vamp"
 // #define CONTROLLER_ID 0x8750
 
-// A0329340 ****************************** First S3 Controller POC (now full controller) (has Battery Mod)
-#define PROD_NAME  "A0329340 Re-Vamp"
-#define CONTROLLER_ID 0x9340 
+// // A0329340 ****************************** First S3 Controller POC (now full controller) (has Battery Mod)
+// #define PROD_NAME  "A0329340 Re-Vamp"
+// #define CONTROLLER_ID 0x9340 
 
 // // A0148860 ****************************** First PCB S3 controller
 // #define PROD_NAME  "A0148860 Re-Vamp"
@@ -363,20 +363,22 @@ Notes for revisions
 	// +==============================+
 	// |       Battery Defines        |
 	// +==============================+
-	#define BATT_FILT_LEN    10 // Rolling average length
-	#define BATT_ADC_OFFSET  ((ADC_MAX / ADC_MAX_V) * 0.2) // where is this coming from? (Apply pre-upscaling) (in volts)
-	#define BATT_RHIGH       221000 // Reistor in voltage devider network
-	#define BATT_RLOW        100000 // Reistor in voltage devider network
-	#define BATT_CONV_ADJ    0.000  // need to adjust the conversion? (actually not needed after adjusting pre conversion value?)
-	#define BATT_CONVERSION  (((BATT_RHIGH + BATT_RLOW * 1.0) / BATT_RLOW) + BATT_CONV_ADJ) // multiplier to conver to voltagealc
-	#define BATT_MAX_V       (ADC_MAX_V * BATT_CONVERSION) // actual voltage the ADC can read
-	#define BAT_LOW_VR1      4.263 // this is when battery voltage starts to affect 3.3v regulated power. Read at regulator input
-	#define BAT_NO_NOISE_VR1 4.404 // Below this is when power rail sag from transmits starts to become noticable
-	#define BAT_LOW_D2       4.484 // Below this is when battery voltage starts to affect 3.3v regulated power. read before the protection diode
-	#define BAT_NO_NOISE_D2  4.650 // Below this is when power rail sag from transmits starts to become noticable
-	#define BAT_NO_V         3.600 // Above this there is battery voltage present (when positive disconnected input floats to ~3.3V)
-	#define BAT_FULL_D2      6.600 // Batteries full (100% battery) (Alkaline. Lithium will be higher)
-	#define BAT_FLASH_PERIOD 500 // ms
+	#define BATT_FILT_LEN     10 // Rolling average length
+	#define BATT_ADC_OFFSET   ((ADC_MAX / ADC_MAX_V) * 0.2) // where is this coming from? (Apply pre-upscaling) (in volts)
+	#define BATT_RHIGH        221000 // Reistor in voltage devider network
+	#define BATT_RLOW         100000 // Reistor in voltage devider network
+	#define BATT_CONV_ADJ     0.000  // need to adjust the conversion? (actually not needed after adjusting pre conversion value?)
+	#define BATT_CONVERSION   (((BATT_RHIGH + BATT_RLOW * 1.0) / BATT_RLOW) + BATT_CONV_ADJ) // multiplier to conver to voltagealc
+	#define BATT_MAX_V        (ADC_MAX_V * BATT_CONVERSION) // actual voltage the ADC can read (should be ~9.951)
+	#define BAT_LOW_VR1       4.263 // this is when battery voltage starts to affect 3.3v regulated power. Read at regulator input
+	#define BAT_NO_NOISE_VR1  4.404 // Below this is when power rail sag from transmits starts to become noticable
+	#define BAT_LOW_D2        4.484 // Below this is when battery voltage starts to affect 3.3v regulated power. read before the protection diode
+	#define BAT_NO_NOISE_D2   4.650 // Below this is when power rail sag from transmits starts to become noticable
+	#define BAT_NO_V          3.600 // Above this there is battery voltage present (when positive disconnected input floats to ~3.3V)
+	#define BAT_FULL_D2       6.600 // Batteries full (100% battery) (Alkaline. Lithium will be higher)
+	#define BAT_REP_DELTA     ((BAT_FULL_D2 - BAT_NO_NOISE_D2) * 0.02) // 2% how much change in level before sending new value
+	#define BAT_UPDATE_PERIOD 10000 // ms
+	#define BAT_FLASH_PERIOD  500 // ms
 #endif
 
 #define PWM_LED_MAX 255
@@ -453,10 +455,12 @@ uint AdcBufferSteeringTrim[ADC_FILT_LEN] = {0};
 uint AdcBufferThrottleTrim[ADC_FILT_LEN] = {0};
 
 #if BATT_LEVEL
-int  LastBattery = 0;
-uint AdcBufferBattery[BATT_FILT_LEN] = {0};
-int  BatteryFlashCountdown = 0;
-bool BatteryFlashState = false;
+float LastSentBattery = 0.0;
+uint  AdcBufferBattery[BATT_FILT_LEN] = {0};
+int   BatteryUpdateCountdown = 0;
+int   BatteryFlashCountdown = 0;
+bool  BatteryFlashState = false;
+bool  BatteryOnUSB = false; // mainly used to stop constant battery updates when on USB power
 #endif
 
 // +--------------------------------------------------------------+
@@ -466,7 +470,10 @@ void IRAM_ATTR Timer0_ISR()
 {
 	if(VibCountdown > 0) { VibCountdown --; }
 	if(PrintCountdown > 0) { PrintCountdown --; }
+	#if BATT_LEVEL
+	if(BatteryUpdateCountdown > 0) { BatteryUpdateCountdown --; }
 	if(BatteryFlashCountdown > 0) { BatteryFlashCountdown --; }
+	#endif
 }
 
 // +--------------------------------------------------------------+
@@ -513,7 +520,7 @@ void setup()
 	LastSteering     = analogRead(PIN_STR);
 	LastThrottle     = analogRead(PIN_THT);
 	#if BATT_LEVEL
-	LastBattery      = analogRead(PIN_BATT_ADC);
+	LastSentBattery = GetBattVoltageFromAdc(analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET);
 	#endif
 	LastThumbBtn     = !digitalRead(PIN_THMB_BTN);
 	LastMenuBtn      = !digitalRead(PIN_MENU_BTN);
@@ -569,6 +576,10 @@ void setup()
     bleGamepadConfig.setWhichSimulationControls(ENABLE_RUDDER, ENABLE_THROTTLE, ENABLE_ACCELERATOR, ENABLE_BRAKE, ENABLE_STEERING); // Can also be done per-control individually. All are false by default
     bleGamepadConfig.setSimulationMin(SIM_MIN);
     bleGamepadConfig.setSimulationMax(SIM_MAX);
+    #endif
+
+    #if BATT_LEVEL
+	bleGamepad.setBatteryLevel(mapRangeFloat(LastSentBattery, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 100.0)); // map voltage to percentage
     #endif
 
     // bleGamepadConfig.setHidReportId(0x5); // unneeded right?
@@ -726,9 +737,9 @@ void loop()
 				BatteryFlashState = !BatteryFlashState;
 				if(!BatteryFlashState) // turn LEDs off
 				{
-					#if PRINTOUTS
-						Serial.println("Turning LEDS off");
-					#endif
+					// #if PRINTOUTS
+					// 	Serial.println("Turning LEDS off");
+					// #endif
 					analogWrite(PIN_LED_RED,   PWM_LED_MAX);
 					analogWrite(PIN_LED_GREEN, PWM_LED_MAX);
 				}
@@ -860,14 +871,33 @@ void loop()
 		#if BATT_LEVEL
 	    	// +==============================+
 			// |           Battery            |
-			// +==============================+
+			// +==============================+ // this needs to only update like every 5% or 30s or something
 			if(batteryLevel >= BAT_NO_V) // we do have battery power! likely runnig on battery
 			{
-				bleGamepad.setBatteryLevel(mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 100.0)); // map voltage to percentage
+				if(BatteryUpdateCountdown == 0 && (batteryLevel > (LastSentBattery + BAT_REP_DELTA) || batteryLevel < (LastSentBattery - BAT_REP_DELTA)))
+				{
+					bleGamepad.setBatteryLevel(mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 100.0)); // map voltage to percentage
+					LastSentBattery = batteryLevel;
+					BatteryUpdateCountdown = BAT_UPDATE_PERIOD;
+					#if PRINTOUTS
+						Serial.println("Sending new battery level!");
+					#endif
+				}
+				if(BatteryOnUSB)
+				{
+					BatteryOnUSB = false;
+				}
 			}
 			else // we're running code so likely USB powered (report 100% to have windows hide battery level)
 			{
-				bleGamepad.setBatteryLevel(101);
+				if(!BatteryOnUSB)
+				{
+					BatteryOnUSB = true;
+					bleGamepad.setBatteryLevel(101);
+					#if PRINTOUTS
+						Serial.println("On USB Power!");
+					#endif
+				}
 			}
 		#endif
 
