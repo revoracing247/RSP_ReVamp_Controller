@@ -2,6 +2,7 @@
 Pistol Grip Gamepad
 By: Colby R.
 Date: 10/03/2025
+	V5: fixed throttle max high side, added printouts
 	V4: Added Battery level reporting
 	V3: redesigned for ESP32-S3 modules
 	V2: designed for TQi 2 channel contrller (the black 2.4GHz ones)
@@ -10,14 +11,13 @@ Date: 10/03/2025
 
 /*
 Notes for revisions
-	- Add Battery ADC (can report over BLE)
+	- Add Battery ADC (can report over BLE) (pretty much implemented! just need to manually calibrate)
 	- Add ADC sensing for gamepad USB (to maybe disconnect BLE?)
 */
 
-// #include <XInput.h>
-// #include <Arduino.h>
 #include <BleGamepad.h>
 #include <Joystick_ESP32S2.h>
+#include <Preferences.h>
 
 #define VERSION_MAJOR 4
 
@@ -83,6 +83,7 @@ Notes for revisions
 #define FINISHED_CONTROLLER true // changes IO for with/without nose buttons
 #define PRINTOUTS           true
 #define BATT_LEVEL          true // report battery level using voltage divider mod
+#define PERSISTANT_TRIM     true // save trim to chip. hide adjustments behind menu. (use trim as other game inputs)
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -267,6 +268,8 @@ Notes for revisions
 #define MANF_NAME "RSP" // "ReadySetProjects"
 #define VENDOR_ID 0xC01B // Colby!
 
+// These are where you manually set the PID and name for your controller
+
 // // TEST ESP32-C3
 // #define PROD_NAME  "TEST-C3 Re-Vamp" 0x1234
 // #define CONTROLLER_ID 0x1234
@@ -303,9 +306,9 @@ Notes for revisions
 // #define PROD_NAME  "A0306712 Re-Vamp"
 // #define CONTROLLER_ID 0x6712
 
-// // A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
-// #define PROD_NAME  "A0148987 Re-Vamp"
-// #define CONTROLLER_ID 0x8987
+// A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
+#define PROD_NAME  "A0148987 Re-Vamp"
+#define CONTROLLER_ID 0x8987
 
 // // A0148750 ****************************** messed up POT
 // #define PROD_NAME  "A0148750 Re-Vamp"
@@ -358,6 +361,7 @@ Notes for revisions
 #define XINPUT_MIN      -65536 // 16 bit resolution i.e. 0x10000
 #define CONV_MULTI      (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
 #define STARTING_LIMITS 100 // every potentiometer is different so we'll ring the values in a bit to start
+#define STARTING_BRAKE  500 // every potentiometer is different so we'll ring the values in a bit to start
 
 #if BATT_LEVEL
 	// +==============================+
@@ -425,17 +429,24 @@ int PrintCountdown = 0;
 
 int VibCountdown = 0;
 bool VibActivated = false;
-bool TriggerMode = false; // throttle and brakes mapped to triggers instead, like a standard controller
+bool AndroidMode = false; // but press startup to have different button map? (wasn't really working out for some reason)
+bool TrimMode = false; // trim pots actually adjust trim
 bool VibEnabled = false;
 
 int ThrottleMin = STARTING_LIMITS;
-int ThrottleMax = ADC_MAX - STARTING_LIMITS;
+int ThrottleMax = ADC_MAX - STARTING_BRAKE;
 int SteeringMin = STARTING_LIMITS;
 int SteeringMax = ADC_MAX - STARTING_LIMITS;
 int ThrottleTrimMin = STARTING_LIMITS;
 int ThrottleTrimMax = ADC_MAX - STARTING_LIMITS;
 int SteeringTrimMin = STARTING_LIMITS;
 int SteeringTrimMax = ADC_MAX - STARTING_LIMITS;
+
+String ProductName = PROD_NAME;
+int16_t ControllerID = CONTROLLER_ID;
+int ThrottleTrimSaved = ADC_HALF;
+int SteeringTrimSaved = ADC_HALF;
+Preferences prefs;
 
 int  LastSteeringTrim = 0;
 int  LastThrottleTrim = 0;
@@ -488,7 +499,6 @@ void setup()
 	Timer0_Cfg = timerBegin(10000); // 10KHz
     timerAttachInterrupt(Timer0_Cfg, &Timer0_ISR);
     timerAlarm(Timer0_Cfg, 10, true, 0); // fire ISR every 1ms (or every 10 timer ticks), repeat, unlimited times
-    // timerStart(Timer0_Cfg);
 
 	// +==============================+
 	// |            Micro             |
@@ -530,15 +540,42 @@ void setup()
 	LastBtmBtn       = !digitalRead(PIN_BTM_BTN);
 
 	// +==============================+
-	// |         Android Mode         |
+	// |      Persistant Values       |
+	// +==============================+
+	prefs.begin("revamp_prefs", false);
+	ProductName  = prefs.getString("ProductName" ,PROD_NAME);
+	ControllerID = prefs.getInt("ControllerID" ,CONTROLLER_ID);
+	SteeringTrimSaved = prefs.getInt("SteeringTrim", ADC_HALF);
+	ThrottleTrimSaved = prefs.getInt("ThrottleTrim", ADC_HALF);
+
+	// +==============================+
+	// |            Serial            |
+	// +==============================+
+	#if PRINTOUTS
+		Serial.begin(115200);
+		Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+		Serial.print  ("       RE-VAMP CONTROLLER V"); Serial.println(VERSION_MAJOR);
+		Serial.print  ("       "); Serial.print(MANF_NAME); Serial.print(" "); Serial.println(ProductName);
+		Serial.print  ("     PID: 0x"); Serial.print(ControllerID); Serial.print(" VID: 0x"); Serial.println(VENDOR_ID);
+		Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+		#if BATT_LEVEL
+		Serial.println("Battery level enabled!");
+		#endif
+		#if SIM_CONTROLS
+		Serial.println("SIM controls enabled!");
+		#endif
+	#endif
+
+	// +==============================+
+	// |     Persistant Trim Mode     |
 	// +==============================+
 	if(LastMenuBtn)
 	{
-		TriggerMode = true;
-		// // Activate Vibrator to indicate
-		// VibCountdown = VIB_DURATION;
-		// digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
-		// VibActivated = true;
+		TrimMode = true;
+		#if PRINTOUTS
+		Serial.println("TRIM Mode!!");
+		Serial.println("Please adjust trim pots to desired levels and press SET button to resume normal operation");
+		#endif
 	}
 
 	// +==============================+
@@ -553,13 +590,6 @@ void setup()
 		VibActivated = true;
 	}
 
-	// +==============================+
-	// |            Serial            |
-	// +==============================+
-	#if PRINTOUTS
-		Serial.begin(115200);
-		Serial.println("Starting BLE work!");
-	#endif
 	// +==============================+
 	// |          Bluetooth           |
 	// +==============================+
@@ -584,7 +614,7 @@ void setup()
 
     // bleGamepadConfig.setHidReportId(0x5); // unneeded right?
 	bleGamepadConfig.setVid(VENDOR_ID);
-	bleGamepadConfig.setPid(CONTROLLER_ID);
+	bleGamepadConfig.setPid(ControllerID);
 	bleGamepad.begin(&bleGamepadConfig); // Changing bleGamepadConfig after the begin function has no effect, unless you call the begin function again
 
     #if SIM_CONTROLS
@@ -597,9 +627,9 @@ void setup()
 	// +==============================+
 	// |          usbGamepad          |
 	// +==============================+
-	USB.PID(CONTROLLER_ID);
+	USB.PID(ControllerID);
 	USB.VID(VENDOR_ID);
-	USB.productName(PROD_NAME);
+	USB.productName((const char)ProductName);
 	USB.manufacturerName(MANF_NAME);
 	USB.begin();
 
@@ -719,15 +749,46 @@ void loop()
 				Serial.print(batteryLevel, 4);
 				Serial.print(" V (");
 				Serial.print((analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET) * (ADC_MAX_V/ADC_MAX), 4);
-				Serial.println(" V)");
+				Serial.print(" V)    TH: ");
+				Serial.print(throttlePosition);
+				Serial.print("   ST: ");
+				Serial.print(steeringPosition);
+				Serial.println("");
 			#endif
 		}
+	#endif
+	
+	#if 0
+	// +==============================+
+	// |     button reset limits      |
+	// +==============================+
+	if(!digitalRead(PIN_SET_BTN) &&
+		(  ThrottleMin     != STARTING_LIMITS
+		|| ThrottleMax     != ADC_MAX - STARTING_BRAKE
+		|| SteeringMin     != STARTING_LIMITS
+		|| SteeringMax     != ADC_MAX - STARTING_LIMITS
+		|| ThrottleTrimMin != STARTING_LIMITS
+		|| ThrottleTrimMax != ADC_MAX - STARTING_LIMITS
+		|| SteeringTrimMin != STARTING_LIMITS
+		|| SteeringTrimMax != ADC_MAX - STARTING_LIMITS ))
+	{
+		#if PRINTOUTS
+			Serial.println("Restetting ADC Limits!");
+		#endif
+		ThrottleMin = STARTING_LIMITS;
+		ThrottleMax = ADC_MAX - STARTING_BRAKE;
+		SteeringMin = STARTING_LIMITS;
+		SteeringMax = ADC_MAX - STARTING_LIMITS;
+		ThrottleTrimMin = STARTING_LIMITS;
+		ThrottleTrimMax = ADC_MAX - STARTING_LIMITS;
+		SteeringTrimMin = STARTING_LIMITS;
+		SteeringTrimMax = ADC_MAX - STARTING_LIMITS;
+	}
 	#endif
 
 	// +==============================+
 	// |             LEDS             |
 	// +==============================+
-	// if(!digitalRead(PIN_MID_BTN))
 	#if BATT_LEVEL
 		if(batteryLevel >= BAT_NO_V && batteryLevel <= BAT_NO_NOISE_D2) // Low battery voltage! flash LEDs (red only?)
 		{
@@ -737,9 +798,6 @@ void loop()
 				BatteryFlashState = !BatteryFlashState;
 				if(!BatteryFlashState) // turn LEDs off
 				{
-					// #if PRINTOUTS
-					// 	Serial.println("Turning LEDS off");
-					// #endif
 					analogWrite(PIN_LED_RED,   PWM_LED_MAX);
 					analogWrite(PIN_LED_GREEN, PWM_LED_MAX);
 				}
@@ -749,10 +807,6 @@ void loop()
 				analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 				analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 			}
-			// analogWrite(PIN_LED_RED,   ((PWM_LED_MAX - PWM_LED_MIN)/2));
-			// analogWrite(PIN_LED_GREEN, ((PWM_LED_MAX - PWM_LED_MIN)/2));
-			// analogWrite(PIN_LED_RED,   mapRange(batteryLevel, 0, BATT_MAX_V, PWM_LED_MIN, PWM_LED_MAX));
-			// analogWrite(PIN_LED_GREEN, mapRange(ADC_MAX - analogRead(PIN_BATT_ADC), 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		}
 		else
 		{
@@ -798,7 +852,7 @@ void loop()
     if (bleGamepad.isConnected())
     {
 		#if FINISHED_CONTROLLER
-			if(TriggerMode)
+			if(AndroidMode)
 			{
 		        if     (!bleGamepad.isPressed(AND_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (AND_THMB_BTN); }
 		        else if( bleGamepad.isPressed(AND_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(AND_THMB_BTN); }
@@ -829,7 +883,7 @@ void loop()
 		        else if( bleGamepad.isPressed(BLE_BTM_BTN)  &&  digitalRead(PIN_BTM_BTN)) { bleGamepad.release(BLE_BTM_BTN);  }
 		    }
 		#else // NO Nose buttons CONTROLLER
-			if(TriggerMode)
+			if(AndroidMode)
 			{
 		        if     (!bleGamepad.isPressed(AND_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (AND_THMB_BTN); }
 		        else if( bleGamepad.isPressed(AND_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(AND_THMB_BTN); }
@@ -879,9 +933,6 @@ void loop()
 					bleGamepad.setBatteryLevel(mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 100.0)); // map voltage to percentage
 					LastSentBattery = batteryLevel;
 					BatteryUpdateCountdown = BAT_UPDATE_PERIOD;
-					#if PRINTOUTS
-						Serial.println("Sending new battery level!");
-					#endif
 				}
 				if(BatteryOnUSB)
 				{
