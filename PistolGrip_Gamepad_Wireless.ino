@@ -84,7 +84,7 @@ Notes for revisions
 #define PRINTOUTS           true
 #define BATT_LEVEL          true // report battery level using voltage divider mod
 #define PERSISTANT_TRIM     true // save trim to chip. hide adjustments behind menu. (use trim as other game inputs)
-#define WRTIE_REGISTRATION  false // write controller ID and other info into non-volitale memory
+#define WRTIE_REGISTRATION  true // write controller ID and other info into non-volitale memory
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -307,9 +307,9 @@ Notes for revisions
 // #define PROD_NAME  "A0306712 Re-Vamp"
 // #define CONTROLLER_ID 0x6712
 
-// // A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
-// #define PROD_NAME  "A0148987 Re-Vamp"
-// #define CONTROLLER_ID 0x8987
+// A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
+#define PROD_NAME  "A0148987 Re-Vamp"
+#define CONTROLLER_ID 0x8987
 
 // // A0148750 ****************************** messed up POT
 // #define PROD_NAME  "A0148750 Re-Vamp"
@@ -354,15 +354,16 @@ Notes for revisions
 // +--------------------------------------------------------------+
 // |                          Constants                           |
 // +--------------------------------------------------------------+
-#define ADC_MAX         0xFFF // For ESP32-C3 12-Bit (4096 values, ie. 0-4095)
-#define ADC_HALF        ((ADC_MAX+1)/2)
-#define ADC_MAX_V       3.1 // max voltage ADC can reada
-#define ADC_FILT_LEN    5 // Rolling average length
-#define XINPUT_MAX      0xFFFF // 65536 i.e. 16 bit resolution
-#define XINPUT_MIN      -65536 // 16 bit resolution i.e. 0x10000
-#define CONV_MULTI      (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
-#define STARTING_LIMITS 100 // every potentiometer is different so we'll ring the values in a bit to start
-#define STARTING_BRAKE  500 // every potentiometer is different so we'll ring the values in a bit to start
+#define ADC_MAX          0xFFF // For ESP32-C3 12-Bit (4096 values, ie. 0-4095)
+#define ADC_HALF         ((ADC_MAX+1)/2)
+#define ADC_MAX_V        3.1 // max voltage ADC can reada
+#define ADC_FILT_LEN     5 // Rolling average length
+#define XINPUT_MAX       0xFFFF // 65536 i.e. 16 bit resolution
+#define XINPUT_MIN       -65536 // 16 bit resolution i.e. 0x10000
+#define CONV_MULTI       (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
+#define STARTING_LIMITS  100 // every potentiometer is different so we'll ring the values in a bit to start
+#define STARTING_BRAKE   500 // every potentiometer is different so we'll ring the values in a bit to start
+#define SET_FLASH_PERIOD 250 // ms how fast to flash when in settings mode (change saved trim pos)
 
 #if BATT_LEVEL
 	// +==============================+
@@ -427,12 +428,14 @@ Joystick_  usbGamepad(JOYSTICK_DEFAULT_REPORT_ID,JOYSTICK_TYPE_GAMEPAD,
 hw_timer_t *Timer0_Cfg = NULL;
 
 int PrintCountdown = 0;
+int LedFlashCountdown = 0;
 
-int VibCountdown = 0;
+int  VibCountdown = 0;
 bool VibActivated = false;
 bool AndroidMode = false; // but press startup to have different button map? (wasn't really working out for some reason)
 bool TrimMode = false; // trim pots actually adjust trim
 bool VibEnabled = false;
+bool LedFlashState = false; // when flashing are the LEDs on or off?
 
 int ThrottleMin = STARTING_LIMITS;
 int ThrottleMax = ADC_MAX - STARTING_BRAKE;
@@ -470,8 +473,6 @@ uint AdcBufferThrottleTrim[ADC_FILT_LEN] = {0};
 float LastSentBattery = 0.0;
 uint  AdcBufferBattery[BATT_FILT_LEN] = {0};
 int   BatteryUpdateCountdown = 0;
-int   BatteryFlashCountdown = 0;
-bool  BatteryFlashState = false;
 bool  BatteryOnUSB = false; // mainly used to stop constant battery updates when on USB power
 #endif
 
@@ -482,9 +483,10 @@ void IRAM_ATTR Timer0_ISR()
 {
 	if(VibCountdown > 0) { VibCountdown --; }
 	if(PrintCountdown > 0) { PrintCountdown --; }
+	if(LedFlashCountdown > 0) { LedFlashCountdown --; }
+
 	#if BATT_LEVEL
 	if(BatteryUpdateCountdown > 0) { BatteryUpdateCountdown --; }
-	if(BatteryFlashCountdown > 0) { BatteryFlashCountdown --; }
 	#endif
 }
 
@@ -559,9 +561,9 @@ void setup()
 	#if PRINTOUTS
 		Serial.begin(115200);
 		Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-		Serial.print  ("       RE-VAMP CONTROLLER V"); Serial.println(VERSION_MAJOR);
-		Serial.print  ("       "); Serial.print(MANF_NAME); Serial.print(" "); Serial.println(ProductName);
-		Serial.print  ("     PID: 0x"); Serial.print(ControllerID, HEX); Serial.print(" VID: 0x"); Serial.println(VENDOR_ID, HEX);
+		Serial.printf ("       RE-VAMP CONTROLLER V%d\r\n", VERSION_MAJOR);
+		Serial.printf ("       %s %s\r\n", MANF_NAME, ProductName.c_str());
+		Serial.printf ("     PID: 0x%04X  VID: 0x%04X\r\n", (uint16_t)ControllerID, VENDOR_ID);
 		Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 		#if BATT_LEVEL
 		Serial.println("Battery level enabled!");
@@ -741,6 +743,11 @@ void loop()
 
 
 	// +==============================+
+	// |          Save Trims          |
+	// +==============================+
+	
+
+	// +==============================+
 	// |          Printouts           |
 	// +==============================+
 	#if PRINTOUTS
@@ -748,17 +755,12 @@ void loop()
 		{
 			PrintCountdown = PRINT_PERIOD;
 			#if BATT_LEVEL
-				Serial.print("BATT ");
-				Serial.print(mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 99.0));
-				Serial.print("% ");
-				Serial.print(batteryLevel, 4);
-				Serial.print(" V (");
-				Serial.print((analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET) * (ADC_MAX_V/ADC_MAX), 4);
-				Serial.print(" V)    TH: ");
-				Serial.print(throttlePosition);
-				Serial.print("   ST: ");
-				Serial.print(steeringPosition);
-				Serial.println("");
+				// Serial.printf("BATT %0.2f%% %0.04f V (%0.04f V)     TH:%d    ST:%d\r\n",
+				// 			 mapRangeFloat(batteryLevel, BAT_NO_NOISE_D2, BAT_FULL_D2, 0.0, 99.0), 
+				// 			 batteryLevel, 
+				// 			 (analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET) * (ADC_MAX_V/ADC_MAX), 
+				// 			 throttlePosition, 
+				// 			 steeringPosition);
 			#endif
 		}
 	#endif
@@ -794,37 +796,49 @@ void loop()
 	// +==============================+
 	// |             LEDS             |
 	// +==============================+
-	#if BATT_LEVEL
-		if(batteryLevel >= BAT_NO_V && batteryLevel <= BAT_NO_NOISE_D2) // Low battery voltage! flash LEDs (red only?)
+	if(TrimMode) // user can save trim position to memory
+	{
+		if(LedFlashCountdown == 0)
 		{
-			if(BatteryFlashCountdown == 0)
+			LedFlashCountdown = SET_FLASH_PERIOD;
+			LedFlashState = !LedFlashState;
+			if(!LedFlashState) // turn LEDs off
 			{
-				BatteryFlashCountdown = BAT_FLASH_PERIOD;
-				BatteryFlashState = !BatteryFlashState;
-				if(!BatteryFlashState) // turn LEDs off
-				{
-					analogWrite(PIN_LED_RED,   PWM_LED_MAX);
-					analogWrite(PIN_LED_GREEN, PWM_LED_MAX);
-				}
-			}
-			if(BatteryFlashState) // Control LEDs like normal
-			{
-				analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-				analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+				analogWrite(PIN_LED_RED,   PWM_LED_MAX);
+				analogWrite(PIN_LED_GREEN, PWM_LED_MAX);
 			}
 		}
-		else
+		if(LedFlashState) // Control LEDs like normal
 		{
-			#if 0 // LEDs based off Trim
 			analogWrite(PIN_LED_RED,   mapRange(adjustedThrottleTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 			analogWrite(PIN_LED_GREEN, mapRange(adjustedSteeringTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-			#else // LEDs based off throttle/stering
-			analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-			analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-			#endif
 		}
 
-	#else
+	}
+
+	#if BATT_LEVEL
+	else if(batteryLevel >= BAT_NO_V && batteryLevel <= BAT_NO_NOISE_D2) // Low battery voltage! flash LEDs (red only?)
+	{
+		if(LedFlashCountdown == 0)
+		{
+			LedFlashCountdown = BAT_FLASH_PERIOD;
+			LedFlashState = !LedFlashState;
+			if(!LedFlashState) // turn LEDs off
+			{
+				analogWrite(PIN_LED_RED,   PWM_LED_MAX);
+				analogWrite(PIN_LED_GREEN, PWM_LED_MAX);
+			}
+		}
+		if(LedFlashState) // Control LEDs like normal
+		{
+			analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+			analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
+		}
+	}
+	#endif
+
+	else
+	{
 		#if 0 // LEDs based off Trim
 		analogWrite(PIN_LED_RED,   mapRange(adjustedThrottleTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		analogWrite(PIN_LED_GREEN, mapRange(adjustedSteeringTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
@@ -832,7 +846,8 @@ void loop()
 		analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		#endif
-	#endif
+	}
+
 	// +==============================+
 	// |           Vibrator           |
 	// +==============================+
