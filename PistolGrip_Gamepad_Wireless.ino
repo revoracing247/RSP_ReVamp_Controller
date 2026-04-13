@@ -84,6 +84,7 @@ Notes for revisions
 #define PRINTOUTS           true
 #define BATT_LEVEL          true // report battery level using voltage divider mod
 #define PERSISTANT_TRIM     true // save trim to chip. hide adjustments behind menu. (use trim as other game inputs)
+#define WRTIE_REGISTRATION  false // write controller ID and other info into non-volitale memory
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -306,9 +307,9 @@ Notes for revisions
 // #define PROD_NAME  "A0306712 Re-Vamp"
 // #define CONTROLLER_ID 0x6712
 
-// A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
-#define PROD_NAME  "A0148987 Re-Vamp"
-#define CONTROLLER_ID 0x8987
+// // A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
+// #define PROD_NAME  "A0148987 Re-Vamp"
+// #define CONTROLLER_ID 0x8987
 
 // // A0148750 ****************************** messed up POT
 // #define PROD_NAME  "A0148750 Re-Vamp"
@@ -543,8 +544,12 @@ void setup()
 	// |      Persistant Values       |
 	// +==============================+
 	prefs.begin("revamp_prefs", false);
-	ProductName  = prefs.getString("ProductName" ,PROD_NAME);
-	ControllerID = prefs.getInt("ControllerID" ,CONTROLLER_ID);
+	#if WRTIE_REGISTRATION
+	prefs.putString("ProductName", PROD_NAME);
+	prefs.putInt("ControllerID", CONTROLLER_ID);
+	#endif
+	ProductName  = prefs.getString("ProductName", PROD_NAME);
+	ControllerID = prefs.getInt("ControllerID", CONTROLLER_ID);
 	SteeringTrimSaved = prefs.getInt("SteeringTrim", ADC_HALF);
 	ThrottleTrimSaved = prefs.getInt("ThrottleTrim", ADC_HALF);
 
@@ -556,7 +561,7 @@ void setup()
 		Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 		Serial.print  ("       RE-VAMP CONTROLLER V"); Serial.println(VERSION_MAJOR);
 		Serial.print  ("       "); Serial.print(MANF_NAME); Serial.print(" "); Serial.println(ProductName);
-		Serial.print  ("     PID: 0x"); Serial.print(ControllerID); Serial.print(" VID: 0x"); Serial.println(VENDOR_ID);
+		Serial.print  ("     PID: 0x"); Serial.print(ControllerID, HEX); Serial.print(" VID: 0x"); Serial.println(VENDOR_ID, HEX);
 		Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 		#if BATT_LEVEL
 		Serial.println("Battery level enabled!");
@@ -629,7 +634,7 @@ void setup()
 	// +==============================+
 	USB.PID(ControllerID);
 	USB.VID(VENDOR_ID);
-	USB.productName((const char)ProductName);
+	USB.productName(ProductName.c_str()); // convert to const char*
 	USB.manufacturerName(MANF_NAME);
 	USB.begin();
 
