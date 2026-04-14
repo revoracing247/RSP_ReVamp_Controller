@@ -3,6 +3,8 @@ Pistol Grip Gamepad
 By: Colby R.
 Date: 10/03/2025
 	V5: fixed throttle max high side, added printouts
+	    Also added persistant values with trim adjustment behind an added menu mode (hold menu/set buttons)
+	    Added saving VibratorEnabled to memory/menu
 	V4: Added Battery level reporting
 	V3: redesigned for ESP32-S3 modules
 	V2: designed for TQi 2 channel contrller (the black 2.4GHz ones)
@@ -19,7 +21,7 @@ Notes for revisions
 #include <Joystick_ESP32S2.h>
 #include <Preferences.h>
 
-#define VERSION_MAJOR 4
+#define VERSION_MAJOR 5
 
 // +--------------------------------------------------------------+
 // |                       Connection Notes                       |
@@ -84,7 +86,8 @@ Notes for revisions
 #define PRINTOUTS           true
 #define BATT_LEVEL          true // report battery level using voltage divider mod
 #define PERSISTANT_TRIM     true // save trim to chip. hide adjustments behind menu. (use trim as other game inputs)
-#define WRTIE_REGISTRATION  true // write controller ID and other info into non-volitale memory
+#define WRTIE_REGISTRATION  false // write controller ID and other info into non-volitale memory
+#define VIB_DEFAULT         false // vibrator default to on/off (also saved to persistance memory!)
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -364,6 +367,7 @@ Notes for revisions
 #define STARTING_LIMITS  100 // every potentiometer is different so we'll ring the values in a bit to start
 #define STARTING_BRAKE   500 // every potentiometer is different so we'll ring the values in a bit to start
 #define SET_FLASH_PERIOD 250 // ms how fast to flash when in settings mode (change saved trim pos)
+#define MENU_WAIT        3000 // ms how long to hold down MENU & SET buttons to enter menu
 
 #if BATT_LEVEL
 	// +==============================+
@@ -430,12 +434,15 @@ hw_timer_t *Timer0_Cfg = NULL;
 int PrintCountdown = 0;
 int LedFlashCountdown = 0;
 
+int MenuCount = 0;
+
 int  VibCountdown = 0;
-bool VibActivated = false;
+bool VibActivated = false; // Is the vibrator active?
 bool AndroidMode = false; // but press startup to have different button map? (wasn't really working out for some reason)
-bool TrimMode = false; // trim pots actually adjust trim
-bool VibEnabled = false;
+bool MenuMode = false; // trim pots actually adjust trim
+bool VibEnabled = VIB_DEFAULT; // activate vibrator when THUMB button pressed
 bool LedFlashState = false; // when flashing are the LEDs on or off?
+bool MenuEntrance = false; // count up to enter menu
 
 int ThrottleMin = STARTING_LIMITS;
 int ThrottleMax = ADC_MAX - STARTING_BRAKE;
@@ -452,8 +459,8 @@ int ThrottleTrimSaved = ADC_HALF;
 int SteeringTrimSaved = ADC_HALF;
 Preferences prefs;
 
-int  LastSteeringTrim = 0;
 int  LastThrottleTrim = 0;
+int  LastSteeringTrim = 0;
 int  LastSteering     = 0;
 int  LastThrottle     = 0;
 
@@ -481,9 +488,11 @@ bool  BatteryOnUSB = false; // mainly used to stop constant battery updates when
 // +--------------------------------------------------------------+
 void IRAM_ATTR Timer0_ISR()
 {
-	if(VibCountdown > 0) { VibCountdown --; }
-	if(PrintCountdown > 0) { PrintCountdown --; }
+	if(VibCountdown      > 0) { VibCountdown --; }
+	if(PrintCountdown    > 0) { PrintCountdown --; }
 	if(LedFlashCountdown > 0) { LedFlashCountdown --; }
+
+	if(MenuEntrance) { MenuCount ++; } else { MenuCount = 0; }
 
 	#if BATT_LEVEL
 	if(BatteryUpdateCountdown > 0) { BatteryUpdateCountdown --; }
@@ -528,12 +537,12 @@ void setup()
 	// +==============================+
 	// |         Init Values          |
 	// +==============================+
-	LastSteeringTrim = analogRead(PIN_THT_TRM);
-	LastThrottleTrim = analogRead(PIN_STR_TRM);
-	LastSteering     = analogRead(PIN_STR);
+	LastThrottleTrim = analogRead(PIN_THT_TRM);
+	LastSteeringTrim = analogRead(PIN_STR_TRM);
 	LastThrottle     = analogRead(PIN_THT);
+	LastSteering     = analogRead(PIN_STR);
 	#if BATT_LEVEL
-	LastSentBattery = GetBattVoltageFromAdc(analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET);
+	LastSentBattery  = GetBattVoltageFromAdc(analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET);
 	#endif
 	LastThumbBtn     = !digitalRead(PIN_THMB_BTN);
 	LastMenuBtn      = !digitalRead(PIN_MENU_BTN);
@@ -552,8 +561,10 @@ void setup()
 	#endif
 	ProductName  = prefs.getString("ProductName", PROD_NAME);
 	ControllerID = prefs.getInt("ControllerID", CONTROLLER_ID);
-	SteeringTrimSaved = prefs.getInt("SteeringTrim", ADC_HALF);
 	ThrottleTrimSaved = prefs.getInt("ThrottleTrim", ADC_HALF);
+	SteeringTrimSaved = prefs.getInt("SteeringTrim", ADC_HALF);
+	VibEnabled = prefs.getBool("Vibrator", VIB_DEFAULT);
+	prefs.end();
 
 	// +==============================+
 	// |            Serial            |
@@ -571,6 +582,15 @@ void setup()
 		#if SIM_CONTROLS
 		Serial.println("SIM controls enabled!");
 		#endif
+
+		if(ThrottleTrimSaved > ADC_HALF)      { Serial.printf("Saved Throttle Trim: +%02d%% (%04d/%04d)\r\n", mapRange(ThrottleTrimSaved, ADC_HALF, ADC_MAX, 0, 100), ThrottleTrimSaved, ADC_MAX); }
+		else if(ThrottleTrimSaved < ADC_HALF) { Serial.printf("Saved Throttle Trim: -%02d%% (%04d/%04d)\r\n", mapRange(ThrottleTrimSaved, 0, ADC_HALF, 100, 0), ThrottleTrimSaved, ADC_MAX); }
+		else/*ThrottleTrimSaved == ADC_HALF*/ { Serial.printf("Default Throttle Trim: %02d%% (%04d/%04d)\r\n", 0, ThrottleTrimSaved, ADC_MAX); }
+
+		if(SteeringTrimSaved > ADC_HALF)      { Serial.printf("Saved Steering Trim: +%02d%% (%04d/%04d)\r\n", mapRange(SteeringTrimSaved, ADC_HALF, ADC_MAX, 0, 100), SteeringTrimSaved, ADC_MAX); }
+		else if(SteeringTrimSaved < ADC_HALF) { Serial.printf("Saved Steering Trim: -%02d%% (%04d/%04d)\r\n", mapRange(SteeringTrimSaved, 0, ADC_HALF, 100, 0), SteeringTrimSaved, ADC_MAX); }
+		else/*SteeringTrimSaved == ADC_HALF*/ { Serial.printf("Default Steering Trim: %02d%% (%04d/%04d)\r\n", 0, SteeringTrimSaved, ADC_MAX); }
+
 	#endif
 
 	// +==============================+
@@ -578,23 +598,29 @@ void setup()
 	// +==============================+
 	if(LastMenuBtn)
 	{
-		TrimMode = true;
+		#if 0 // enter manu through startup button holds
+		MenuMode = true;
 		#if PRINTOUTS
 		Serial.println("TRIM Mode!!");
 		Serial.println("Please adjust trim pots to desired levels and press SET button to resume normal operation");
+		#endif
 		#endif
 	}
 
 	// +==============================+
 	// |       Vibrator Enabled       |
 	// +==============================+
-	if(LastSetBtn)
+	if(LastSetBtn || VibEnabled)
 	{
 		VibEnabled = true;
 		// Activate Vibrator to indicate
 		VibCountdown = VIB_DURATION;
 		digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
 		VibActivated = true;
+
+		#if PRINTOUTS
+		Serial.println("Vibrator Activated!");
+		#endif
 	}
 
 	// +==============================+
@@ -682,6 +708,10 @@ float GetBattVoltageFromAdc(int adcIn)
 	return (adcIn * (BATT_MAX_V / ADC_MAX));
 }
 
+
+// +--------------------------------------------------------------+
+// |                          Main Loop                           |
+// +--------------------------------------------------------------+
 void loop()
 {
 	int throttlePosition = AverageAdc(analogRead(PIN_THT), AdcBufferSteering, ADC_FILT_LEN); // NOTE: 12 bit ADC (0-4095)
@@ -692,6 +722,16 @@ void loop()
 	float batteryLevel = GetBattVoltageFromAdc(AverageAdc(analogRead(PIN_BATT_ADC) + BATT_ADC_OFFSET, AdcBufferBattery, BATT_FILT_LEN)); // NOTE: 12 bit ADC (0-4095)
 	#endif
 
+	bool newThumbBtn = !digitalRead(PIN_THMB_BTN);
+	bool newMenuBtn  = !digitalRead(PIN_MENU_BTN);
+	bool newSetBtn   = !digitalRead(PIN_SET_BTN);
+	bool newTopBtn   = !digitalRead(PIN_TOP_BTN);
+	bool newMidBtn   = !digitalRead(PIN_MID_BTN);
+	bool newBtmBtn   = !digitalRead(PIN_BTM_BTN);
+
+	// +==============================+
+	// |      Analog Adjustments      |
+	// +==============================+
 	if(ThrottleMin > throttlePosition) { ThrottleMin = throttlePosition; }
 	if(ThrottleMax < throttlePosition) { ThrottleMax = throttlePosition; }
 	if(SteeringMin > steeringPosition) { SteeringMin = steeringPosition; }
@@ -701,9 +741,6 @@ void loop()
 	if(SteeringTrimMin > steeringTrimPosition) { SteeringTrimMin = steeringTrimPosition; }
 	if(SteeringTrimMax < steeringTrimPosition) { SteeringTrimMax = steeringTrimPosition; }
 
-	// +==============================+
-	// |      Analog Adjustments      |
-	// +==============================+
 	int adjustedThrottle = mapRange(throttlePosition, ThrottleMin, ThrottleMax, 0, ADC_MAX);
 	int adjustedSteering = mapRange(steeringPosition, SteeringMin, SteeringMax, 0, ADC_MAX);
 
@@ -713,7 +750,9 @@ void loop()
 	if(throttleTrimPosition < TRIM_MIN) { throttleTrimPosition = TRIM_MIN; }
 	else if(throttleTrimPosition > TRIM_MAX) { throttleTrimPosition = TRIM_MAX; }
 	int adjustedThrottleTrim = mapRange(throttleTrimPosition, TRIM_MIN, TRIM_MAX, 0, ADC_MAX); // max out range
-	int trimmedCenter = mapRange(adjustedThrottleTrim, 0, ADC_MAX, (ADC_HALF - ((ADC_MAX * TRIM_PERCENT)/2)), (ADC_HALF + ((ADC_MAX * TRIM_PERCENT)/2)));
+	int trimmedCenter = ADC_HALF;
+	if(MenuMode) { trimmedCenter = mapRange(adjustedThrottleTrim, 0, ADC_MAX, (ADC_HALF - ((ADC_MAX * TRIM_PERCENT)/2)), (ADC_HALF + ((ADC_MAX * TRIM_PERCENT)/2))); }
+	else         { trimmedCenter = mapRange(   ThrottleTrimSaved, 0, ADC_MAX, (ADC_HALF - ((ADC_MAX * TRIM_PERCENT)/2)), (ADC_HALF + ((ADC_MAX * TRIM_PERCENT)/2))); }
 	int trimmedThrottle = adjustedThrottle;
 	if(adjustedThrottle > trimmedCenter) // Above trimmed center
 	{
@@ -730,7 +769,8 @@ void loop()
 	if(steeringTrimPosition < TRIM_MIN) { steeringTrimPosition = TRIM_MIN; }
 	else if(steeringTrimPosition > TRIM_MAX) { steeringTrimPosition = TRIM_MAX; }
 	int adjustedSteeringTrim = ADC_MAX - mapRange(steeringTrimPosition, TRIM_MIN, TRIM_MAX, 0, ADC_MAX); // max out range
-	trimmedCenter = mapRange(adjustedSteeringTrim, 0, ADC_MAX, (ADC_HALF - ((ADC_MAX * TRIM_PERCENT)/2)), (ADC_HALF + ((ADC_MAX * TRIM_PERCENT)/2)));
+	if(MenuMode) { trimmedCenter = mapRange(adjustedSteeringTrim, 0, ADC_MAX, (ADC_HALF - ((ADC_MAX * TRIM_PERCENT)/2)), (ADC_HALF + ((ADC_MAX * TRIM_PERCENT)/2))); }
+	else         { trimmedCenter = mapRange(   SteeringTrimSaved, 0, ADC_MAX, (ADC_HALF - ((ADC_MAX * TRIM_PERCENT)/2)), (ADC_HALF + ((ADC_MAX * TRIM_PERCENT)/2))); }
 	int trimmedSteering = adjustedSteering;
 	if(adjustedSteering > trimmedCenter) // Above trimmed center
 	{
@@ -741,11 +781,88 @@ void loop()
 		trimmedSteering = mapRange(adjustedSteering, 0, trimmedCenter, 0, ADC_HALF); // map from 0-50%
 	}
 
+	// +==============================+
+	// |          Enter Menu          |
+	// +==============================+
+	if     ( newMenuBtn &&  newSetBtn && !MenuEntrance) { MenuEntrance = true;  }
+	else if(!newMenuBtn && !newSetBtn &&  MenuEntrance) { MenuEntrance = false; }
+
+	if(MenuCount > MENU_WAIT && !MenuMode)
+	{
+		MenuMode = true;
+		#if PRINTOUTS
+		Serial.println("Entering Menu Mode!!");
+		Serial.println("Please adjust trim pots to desired levels and press SET button to resume normal operation");
+		Serial.println("Or press THUMB button to toggle vibrator enable. Press MENU to exit");
+		#endif
+	}
+
 
 	// +==============================+
 	// |          Save Trims          |
 	// +==============================+
+	if(MenuMode && newSetBtn && !MenuEntrance)
+	{
+		#if PRINTOUTS
+			Serial.println("Saving trim positions!");
+			if(adjustedThrottleTrim > ADC_HALF)      { Serial.printf("Throttle Trim: +%02d%% (%04d/%04d)     ", mapRange(adjustedThrottleTrim, ADC_HALF, ADC_MAX, 0, 100), adjustedThrottleTrim, ADC_MAX); }
+			else if(adjustedThrottleTrim < ADC_HALF) { Serial.printf("Throttle Trim: -%02d%% (%04d/%04d)     ", mapRange(adjustedThrottleTrim, 0, ADC_HALF, 100, 0), adjustedThrottleTrim, ADC_MAX); }
+			else/*adjustedThrottleTrim == ADC_HALF*/ { Serial.printf("Throttle Trim: %02d%% (%04d/%04d)     ", 0, adjustedThrottleTrim, ADC_MAX); }
+
+			if(adjustedSteeringTrim > ADC_HALF)      { Serial.printf("Steering Trim: +%02d%% (%04d/%04d)\r\n", mapRange(adjustedSteeringTrim, ADC_HALF, ADC_MAX, 0, 100), adjustedSteeringTrim, ADC_MAX); }
+			else if(adjustedSteeringTrim < ADC_HALF) { Serial.printf("Steering Trim: -%02d%% (%04d/%04d)\r\n", mapRange(adjustedSteeringTrim, 0, ADC_HALF, 100, 0), adjustedSteeringTrim, ADC_MAX); }
+			else/*adjustedSteeringTrim == ADC_HALF*/ { Serial.printf("Steering Trim: %02d%% (%04d/%04d)\r\n", 0, adjustedSteeringTrim, ADC_MAX); }
+		#endif
+
+		prefs.begin("revamp_prefs", false);
+		prefs.putInt("ThrottleTrim", adjustedThrottleTrim);
+		prefs.putInt("SteeringTrim", adjustedSteeringTrim);
+		prefs.end();
+
+		ThrottleTrimSaved = adjustedThrottleTrim;
+		SteeringTrimSaved = adjustedSteeringTrim;
+
+		MenuMode = false;
+	}
 	
+	// +==============================+
+	// |     Save Vibrator Enable     |
+	// +==============================+
+	if(MenuMode && !newThumbBtn && LastThumbBtn && !MenuEntrance)
+	{
+		VibEnabled = !VibEnabled;
+		// Activate Vibrator to indicate
+		if(VibEnabled)
+		{
+			VibCountdown = VIB_DURATION;
+			digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
+			VibActivated = true;
+		}
+
+		#if PRINTOUTS
+		Serial.printf("Vibrator %s\r\n", VibEnabled? "Enabled!" : "Disabled!");
+		#endif
+	}
+
+	// +==============================+
+	// |        Exit Menu Mode        |
+	// +==============================+
+	if(MenuMode && newMenuBtn && !MenuEntrance)
+	{
+		prefs.begin("revamp_prefs", false);
+		if(VibEnabled != prefs.getBool("Vibrator", VIB_DEFAULT))
+		{
+			prefs.putBool("Vibrator", VibEnabled);
+			#if PRINTOUTS
+			Serial.println("Saving new Vibrator Enable value");
+			#endif
+		}
+		prefs.end();
+		#if PRINTOUTS
+		Serial.println("Exiting Menu...");
+		#endif
+		MenuMode = false;
+	}
 
 	// +==============================+
 	// |          Printouts           |
@@ -762,6 +879,16 @@ void loop()
 				// 			 throttlePosition, 
 				// 			 steeringPosition);
 			#endif
+			if(MenuMode)
+			{
+				if(adjustedThrottleTrim > ADC_HALF)      { Serial.printf("Throttle Trim: +%02d%% (%04d/%04d)     ", mapRange(adjustedThrottleTrim, ADC_HALF, ADC_MAX, 0, 100), adjustedThrottleTrim, ADC_MAX); }
+				else if(adjustedThrottleTrim < ADC_HALF) { Serial.printf("Throttle Trim: -%02d%% (%04d/%04d)     ", mapRange(adjustedThrottleTrim, 0, ADC_HALF, 100, 0), adjustedThrottleTrim, ADC_MAX); }
+				else/*adjustedThrottleTrim == ADC_HALF*/ { Serial.printf("Throttle Trim: %02d%% (%04d/%04d)     ", 0, adjustedThrottleTrim, ADC_MAX); }
+
+				if(adjustedSteeringTrim > ADC_HALF)      { Serial.printf("Steering Trim: +%02d%% (%04d/%04d)\r\n", mapRange(adjustedSteeringTrim, ADC_HALF, ADC_MAX, 0, 100), adjustedSteeringTrim, ADC_MAX); }
+				else if(adjustedSteeringTrim < ADC_HALF) { Serial.printf("Steering Trim: -%02d%% (%04d/%04d)\r\n", mapRange(adjustedSteeringTrim, 0, ADC_HALF, 100, 0), adjustedSteeringTrim, ADC_MAX); }
+				else/*adjustedSteeringTrim == ADC_HALF*/ { Serial.printf("Steering Trim: %02d%% (%04d/%04d)\r\n", 0, adjustedSteeringTrim, ADC_MAX); }
+			}
 		}
 	#endif
 	
@@ -769,7 +896,7 @@ void loop()
 	// +==============================+
 	// |     button reset limits      |
 	// +==============================+
-	if(!digitalRead(PIN_SET_BTN) &&
+	if(newSetBtn &&
 		(  ThrottleMin     != STARTING_LIMITS
 		|| ThrottleMax     != ADC_MAX - STARTING_BRAKE
 		|| SteeringMin     != STARTING_LIMITS
@@ -796,7 +923,7 @@ void loop()
 	// +==============================+
 	// |             LEDS             |
 	// +==============================+
-	if(TrimMode) // user can save trim position to memory
+	if(MenuMode) // user can save trim position to memory
 	{
 		if(LedFlashCountdown == 0)
 		{
@@ -839,25 +966,20 @@ void loop()
 
 	else
 	{
-		#if 0 // LEDs based off Trim
-		analogWrite(PIN_LED_RED,   mapRange(adjustedThrottleTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-		analogWrite(PIN_LED_GREEN, mapRange(adjustedSteeringTrim, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-		#else // LEDs based off throttle/stering
 		analogWrite(PIN_LED_RED,   mapRange(adjustedThrottle, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
 		analogWrite(PIN_LED_GREEN, mapRange(adjustedSteering, 0, ADC_MAX, PWM_LED_MIN, PWM_LED_MAX));
-		#endif
 	}
 
 	// +==============================+
 	// |           Vibrator           |
 	// +==============================+
-	if(VibEnabled && !digitalRead(PIN_THMB_BTN) && VibCountdown == 0 && !VibActivated)
+	if(VibEnabled && newThumbBtn && VibCountdown == 0 && !VibActivated && !MenuMode)
 	{
 		VibCountdown = VIB_DURATION;
 		digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
 		VibActivated = true;
 	}
-	else if(digitalRead(PIN_THMB_BTN) && VibCountdown == 0 && VibActivated)
+	else if(!newThumbBtn && VibCountdown == 0 && VibActivated)
 	{
 		VibActivated = false;
 	}
@@ -874,64 +996,59 @@ void loop()
 		#if FINISHED_CONTROLLER
 			if(AndroidMode)
 			{
-		        if     (!bleGamepad.isPressed(AND_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (AND_THMB_BTN); }
-		        else if( bleGamepad.isPressed(AND_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(AND_THMB_BTN); }
-		        if     (!bleGamepad.isPressed(AND_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (AND_SET_BTN);  }
-		        else if( bleGamepad.isPressed(AND_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(AND_SET_BTN);  }
-		        if     (!bleGamepad.isPressed(AND_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (AND_MENU_BTN); }
-		        else if( bleGamepad.isPressed(AND_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(AND_MENU_BTN); }
-		        if     (!bleGamepad.isPressed(AND_TOP_BTN)  && !digitalRead(PIN_TOP_BTN)) { bleGamepad.press  (AND_TOP_BTN);  }
-		        else if( bleGamepad.isPressed(AND_TOP_BTN)  &&  digitalRead(PIN_TOP_BTN)) { bleGamepad.release(AND_TOP_BTN);  }
-		        if     (!bleGamepad.isPressed(AND_MID_BTN)  && !digitalRead(PIN_MID_BTN)) { bleGamepad.press  (AND_MID_BTN);  }
-		        else if( bleGamepad.isPressed(AND_MID_BTN)  &&  digitalRead(PIN_MID_BTN)) { bleGamepad.release(AND_MID_BTN);  }
-		        if     (!bleGamepad.isPressed(AND_BTM_BTN)  && !digitalRead(PIN_BTM_BTN)) { bleGamepad.press  (AND_BTM_BTN);  }
-		        else if( bleGamepad.isPressed(AND_BTM_BTN)  &&  digitalRead(PIN_BTM_BTN)) { bleGamepad.release(AND_BTM_BTN);  }
+		        if     (!bleGamepad.isPressed(AND_THMB_BTN) &&  newThumbBtn){ bleGamepad.press  (AND_THMB_BTN); }
+		        else if( bleGamepad.isPressed(AND_THMB_BTN) && !newThumbBtn){ bleGamepad.release(AND_THMB_BTN); }
+		        if     (!bleGamepad.isPressed(AND_SET_BTN)  &&  newSetBtn)  { bleGamepad.press  (AND_SET_BTN);  }
+		        else if( bleGamepad.isPressed(AND_SET_BTN)  && !newSetBtn)  { bleGamepad.release(AND_SET_BTN);  }
+		        if     (!bleGamepad.isPressed(AND_MENU_BTN) &&  newMenuBtn) { bleGamepad.press  (AND_MENU_BTN); }
+		        else if( bleGamepad.isPressed(AND_MENU_BTN) && !newMenuBtn) { bleGamepad.release(AND_MENU_BTN); }
+		        if     (!bleGamepad.isPressed(AND_TOP_BTN)  &&  newTopBtn)  { bleGamepad.press  (AND_TOP_BTN);  }
+		        else if( bleGamepad.isPressed(AND_TOP_BTN)  && !newTopBtn)  { bleGamepad.release(AND_TOP_BTN);  }
+		        if     (!bleGamepad.isPressed(AND_MID_BTN)  &&  newMidBtn)  { bleGamepad.press  (AND_MID_BTN);  }
+		        else if( bleGamepad.isPressed(AND_MID_BTN)  && !newMidBtn)  { bleGamepad.release(AND_MID_BTN);  }
+		        if     (!bleGamepad.isPressed(AND_BTM_BTN)  &&  newBtmBtn)  { bleGamepad.press  (AND_BTM_BTN);  }
+		        else if( bleGamepad.isPressed(AND_BTM_BTN)  && !newBtmBtn)  { bleGamepad.release(AND_BTM_BTN);  }
 		    }
 		    else
 		    {
-		    	if     (!bleGamepad.isPressed(BLE_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (BLE_THMB_BTN); }
-		        else if( bleGamepad.isPressed(BLE_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(BLE_THMB_BTN); }
-		        if     (!bleGamepad.isPressed(BLE_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (BLE_SET_BTN);  }
-		        else if( bleGamepad.isPressed(BLE_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(BLE_SET_BTN);  }
-		        if     (!bleGamepad.isPressed(BLE_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (BLE_MENU_BTN); }
-		        else if( bleGamepad.isPressed(BLE_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(BLE_MENU_BTN); }
-		        if     (!bleGamepad.isPressed(BLE_TOP_BTN)  && !digitalRead(PIN_TOP_BTN)) { bleGamepad.press  (BLE_TOP_BTN);  }
-		        else if( bleGamepad.isPressed(BLE_TOP_BTN)  &&  digitalRead(PIN_TOP_BTN)) { bleGamepad.release(BLE_TOP_BTN);  }
-		        if     (!bleGamepad.isPressed(BLE_MID_BTN)  && !digitalRead(PIN_MID_BTN)) { bleGamepad.press  (BLE_MID_BTN);  }
-		        else if( bleGamepad.isPressed(BLE_MID_BTN)  &&  digitalRead(PIN_MID_BTN)) { bleGamepad.release(BLE_MID_BTN);  }
-		        if     (!bleGamepad.isPressed(BLE_BTM_BTN)  && !digitalRead(PIN_BTM_BTN)) { bleGamepad.press  (BLE_BTM_BTN);  }
-		        else if( bleGamepad.isPressed(BLE_BTM_BTN)  &&  digitalRead(PIN_BTM_BTN)) { bleGamepad.release(BLE_BTM_BTN);  }
+		    	if     (!bleGamepad.isPressed(BLE_THMB_BTN) &&  newThumbBtn){ bleGamepad.press  (BLE_THMB_BTN); }
+		        else if( bleGamepad.isPressed(BLE_THMB_BTN) && !newThumbBtn){ bleGamepad.release(BLE_THMB_BTN); }
+		        if     (!bleGamepad.isPressed(BLE_SET_BTN)  &&  newSetBtn)  { bleGamepad.press  (BLE_SET_BTN);  }
+		        else if( bleGamepad.isPressed(BLE_SET_BTN)  && !newSetBtn)  { bleGamepad.release(BLE_SET_BTN);  }
+		        if     (!bleGamepad.isPressed(BLE_MENU_BTN) &&  newMenuBtn) { bleGamepad.press  (BLE_MENU_BTN); }
+		        else if( bleGamepad.isPressed(BLE_MENU_BTN) && !newMenuBtn) { bleGamepad.release(BLE_MENU_BTN); }
+		        if     (!bleGamepad.isPressed(BLE_TOP_BTN)  &&  newTopBtn)  { bleGamepad.press  (BLE_TOP_BTN);  }
+		        else if( bleGamepad.isPressed(BLE_TOP_BTN)  && !newTopBtn)  { bleGamepad.release(BLE_TOP_BTN);  }
+		        if     (!bleGamepad.isPressed(BLE_MID_BTN)  &&  newMidBtn)  { bleGamepad.press  (BLE_MID_BTN);  }
+		        else if( bleGamepad.isPressed(BLE_MID_BTN)  && !newMidBtn)  { bleGamepad.release(BLE_MID_BTN);  }
+		        if     (!bleGamepad.isPressed(BLE_BTM_BTN)  &&  newBtmBtn)  { bleGamepad.press  (BLE_BTM_BTN);  }
+		        else if( bleGamepad.isPressed(BLE_BTM_BTN)  && !newBtmBtn)  { bleGamepad.release(BLE_BTM_BTN);  }
 		    }
 		#else // NO Nose buttons CONTROLLER
 			if(AndroidMode)
 			{
-		        if     (!bleGamepad.isPressed(AND_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (AND_THMB_BTN); }
-		        else if( bleGamepad.isPressed(AND_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(AND_THMB_BTN); }
-		        if     (!bleGamepad.isPressed(AND_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (AND_SET_BTN);  }
-		        else if( bleGamepad.isPressed(AND_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(AND_SET_BTN);  }
-		        if     (!bleGamepad.isPressed(AND_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (AND_MENU_BTN); }
-		        else if( bleGamepad.isPressed(AND_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(AND_MENU_BTN); }
+		        if     (!bleGamepad.isPressed(AND_THMB_BTN) &&  newThumbBtn){ bleGamepad.press  (AND_THMB_BTN); }
+		        else if( bleGamepad.isPressed(AND_THMB_BTN) && !newThumbBtn){ bleGamepad.release(AND_THMB_BTN); }
+		        if     (!bleGamepad.isPressed(AND_SET_BTN)  &&  newSetBtn)  { bleGamepad.press  (AND_SET_BTN);  }
+		        else if( bleGamepad.isPressed(AND_SET_BTN)  && !newSetBtn)  { bleGamepad.release(AND_SET_BTN);  }
+		        if     (!bleGamepad.isPressed(AND_MENU_BTN) &&  newMenuBtn) { bleGamepad.press  (AND_MENU_BTN); }
+		        else if( bleGamepad.isPressed(AND_MENU_BTN) && !newMenuBtn) { bleGamepad.release(AND_MENU_BTN); }
 		    }
 		    else
 		    {
-		    	if     (!bleGamepad.isPressed(BLE_THMB_BTN) && !digitalRead(PIN_THMB_BTN)){ bleGamepad.press  (BLE_THMB_BTN); }
-		        else if( bleGamepad.isPressed(BLE_THMB_BTN) &&  digitalRead(PIN_THMB_BTN)){ bleGamepad.release(BLE_THMB_BTN); }
-		        if     (!bleGamepad.isPressed(BLE_SET_BTN)  && !digitalRead(PIN_SET_BTN)) { bleGamepad.press  (BLE_SET_BTN);  }
-		        else if( bleGamepad.isPressed(BLE_SET_BTN)  &&  digitalRead(PIN_SET_BTN)) { bleGamepad.release(BLE_SET_BTN);  }
-		        if     (!bleGamepad.isPressed(BLE_MENU_BTN) && !digitalRead(PIN_MENU_BTN)){ bleGamepad.press  (BLE_MENU_BTN); }
-		        else if( bleGamepad.isPressed(BLE_MENU_BTN) &&  digitalRead(PIN_MENU_BTN)){ bleGamepad.release(BLE_MENU_BTN); }
+		    	if     (!bleGamepad.isPressed(BLE_THMB_BTN) &&  newThumbBtn){ bleGamepad.press  (BLE_THMB_BTN); }
+		        else if( bleGamepad.isPressed(BLE_THMB_BTN) && !newThumbBtn){ bleGamepad.release(BLE_THMB_BTN); }
+		        if     (!bleGamepad.isPressed(BLE_SET_BTN)  &&  newSetBtn)  { bleGamepad.press  (BLE_SET_BTN);  }
+		        else if( bleGamepad.isPressed(BLE_SET_BTN)  && !newSetBtn)  { bleGamepad.release(BLE_SET_BTN);  }
+		        if     (!bleGamepad.isPressed(BLE_MENU_BTN) &&  newMenuBtn) { bleGamepad.press  (BLE_MENU_BTN); }
+		        else if( bleGamepad.isPressed(BLE_MENU_BTN) && !newMenuBtn) { bleGamepad.release(BLE_MENU_BTN); }
 		    }
 		#endif
 
-		#if 0
-	        bleGamepad.setAxes(AXIS_CENTER, AXIS_CENTER, 0, rightXAxis, rightYAxis, 0);       //(X, Y, Z, RX, RY, RZ)
-        #else
-	        bleGamepad.setX(mapRange(trimmedSteering, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-		    bleGamepad.setY(mapRange(trimmedThrottle, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-		    bleGamepad.setRX(mapRange(adjustedSteeringTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-		    bleGamepad.setRY(mapRange(adjustedThrottleTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
-        #endif
-        // bleGamepad.setAxes(leftXAxis, leftYAxis, 0, rightXAxis, rightYAxis, 0);       //(X, Y, Z, RX, RY, RZ)
+        bleGamepad.setX(mapRange(trimmedSteering, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+	    bleGamepad.setY(mapRange(trimmedThrottle, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+	    bleGamepad.setRX(mapRange(adjustedSteeringTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
+	    bleGamepad.setRY(mapRange(adjustedThrottleTrim, 0, ADC_MAX, AXIS_MIN, AXIS_MAX));
 		
 		#if SIM_CONTROLS
 			// +==============================+
@@ -966,7 +1083,7 @@ void loop()
 					BatteryOnUSB = true;
 					bleGamepad.setBatteryLevel(101);
 					#if PRINTOUTS
-						Serial.println("On USB Power!");
+						// Serial.println("On USB Power!");
 					#endif
 				}
 			}
@@ -981,13 +1098,13 @@ void loop()
     	// |                         USB Gamepad                          |
     	// +--------------------------------------------------------------+
 
-		usbGamepad.setButton(USB_THMB_BTN, !digitalRead(PIN_THMB_BTN));
-		usbGamepad.setButton(USB_SET_BTN,  !digitalRead(PIN_SET_BTN));
-		usbGamepad.setButton(USB_MENU_BTN, !digitalRead(PIN_MENU_BTN));
+		usbGamepad.setButton(USB_THMB_BTN, newThumbBtn);
+		usbGamepad.setButton(USB_SET_BTN,  newSetBtn);
+		usbGamepad.setButton(USB_MENU_BTN, newMenuBtn);
 		#if FINISHED_CONTROLLER
-		usbGamepad.setButton(USB_TOP_BTN,  !digitalRead(PIN_TOP_BTN));
-		usbGamepad.setButton(USB_MID_BTN,  !digitalRead(PIN_MID_BTN));
-		usbGamepad.setButton(USB_BTM_BTN,  !digitalRead(PIN_BTM_BTN));
+		usbGamepad.setButton(USB_TOP_BTN,  newTopBtn);
+		usbGamepad.setButton(USB_MID_BTN,  newMidBtn);
+		usbGamepad.setButton(USB_BTM_BTN,  newBtmBtn);
 		#endif
 
 		// +==============================+
@@ -999,4 +1116,22 @@ void loop()
 		usbGamepad.setRyAxis(mapRange(adjustedThrottleTrim, 0, ADC_MAX, 0, 0x7FFF));
 		usbGamepad.sendState();
     }
+
+    // +--------------------------------------------------------------+
+    // |                      Last State Update                       |
+    // +--------------------------------------------------------------+
+    LastSteeringTrim = steeringPosition;
+	LastThrottleTrim = throttlePosition;
+	LastSteering     = throttleTrimPosition;
+	LastThrottle     = steeringTrimPosition;
+	#if BATT_LEVEL
+	LastSentBattery  = batteryLevel;
+	#endif
+	LastThumbBtn     = newThumbBtn;
+	LastMenuBtn      = newMenuBtn;
+	LastSetBtn       = newSetBtn;
+	LastTopBtn       = newTopBtn;
+	LastMidBtn       = newMidBtn;
+	LastBtmBtn       = newBtmBtn;
+
 }
