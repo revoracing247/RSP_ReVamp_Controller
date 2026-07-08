@@ -82,7 +82,7 @@ Notes for possible revisions
 #define NEG_AXIS            false // set axis range -32767 to 32767 (Some non-Windows operating systems and web based gamepad testers don't like min axis set below 0, so 0 is set by default)
 #define SIM_CONTROLS        false // enable and map throttle/steering to "sim" controls
 #define PRINTOUTS           true
-#define WRTIE_REGISTRATION  false // write controller ID and other info into non-volitale memory
+#define WRTIE_REGISTRATION  false // write controller ID and other info into non-volitale memory (only need once to "register" it)
 #define VIB_DEFAULT         false // vibrator default to on/off (also saved to persistance memory!)
 
 // BLE_Gamepad_Config
@@ -230,7 +230,7 @@ Notes for possible revisions
 // #define PROD_NAME  "TEST-C3 Re-Vamp" 0x1234
 // #define CONTROLLER_ID 0x1234
 
-// // A0148840 ****************************** First ESP32-S3 controller (now full controller)
+// // A0148840 ****************************** First ESP32-S3 controller (now full controller) V5
 // #define PROD_NAME  "A0148840 Re-Vamp"
 // #define CONTROLLER_ID 0x8840
 
@@ -274,7 +274,7 @@ Notes for possible revisions
 // #define PROD_NAME  "A0329340 Re-Vamp"
 // #define CONTROLLER_ID 0x9340 
 
-// // A0148860 ****************************** First PCB S3 controller
+// // A0148860 ****************************** First PCB S3 controller V5
 // #define PROD_NAME  "A0148860 Re-Vamp"
 // #define CONTROLLER_ID 0x8860
 
@@ -317,7 +317,7 @@ Notes for possible revisions
 #define XINPUT_MIN       -65536 // 16 bit resolution i.e. 0x10000
 #define CONV_MULTI       (XINPUT_MAX/(ADC_MAX+1)) // Conversion multiplier from ADC to XINPUT resolutions
 #define STARTING_LIMITS  100 // every potentiometer is different so we'll ring the values in a bit to start
-#define STARTING_BRAKE   500 // every potentiometer is different so we'll ring the values in a bit to start
+#define STARTING_BRAKE   620 // every potentiometer is different so we'll ring the values in a bit to start
 #define SET_FLASH_PERIOD 250 // ms how fast to flash when in settings mode (change saved trim pos)
 #define MENU_WAIT        3000 // ms how long to hold down MENU & SET buttons to enter menu
 
