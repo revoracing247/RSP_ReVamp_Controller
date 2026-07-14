@@ -230,11 +230,11 @@ Notes for possible revisions
 // #define PROD_NAME  "TEST-C3 Re-Vamp" 0x1234
 // #define CONTROLLER_ID 0x1234
 
-// // A0148840 ****************************** First ESP32-S3 controller (now full controller) V5
+// // A0148840 ****************************** now full controller (First ESP32-S3 controller)
 // #define PROD_NAME  "A0148840 Re-Vamp"
 // #define CONTROLLER_ID 0x8840
 
-// // A0392285 ****************************** Has throttle adjuster thing
+// // A0392285 ****************************** now full controller (Has throttle switch thing)
 // #define PROD_NAME  "A0392285 Re-Vamp"
 // #define CONTROLLER_ID 0x2285
 
@@ -242,7 +242,7 @@ Notes for possible revisions
 // #define PROD_NAME  "A0381549 Re-Vamp"
 // #define CONTROLLER_ID 0x1549
 
-// // A0381459 ****************************** First S3 with nose buttons (has Battery Mod)
+// // A0381459 ****************************** now full controller (First S3 with nose buttons)
 // #define PROD_NAME  "A0381459 Re-Vamp"
 // #define CONTROLLER_ID 0x1459
 
@@ -258,39 +258,39 @@ Notes for possible revisions
 // #define PROD_NAME  "A0306966 Re-Vamp"
 // #define CONTROLLER_ID 0x6966
 
-// // A0306712 ****************************** now full controller
+// // A0306712 ****************************** now full controller (Could maybe us a little mor buffer on throttle side? typical pulls reach 0.97 rather than 0.99)
 // #define PROD_NAME  "A0306712 Re-Vamp"
 // #define CONTROLLER_ID 0x6712
 
-// // A0148987 ****************************** Currently an Arduino controller (now full controller) (has Battery Mod)
-// #define PROD_NAME  "A0148987 Re-Vamp"
-// #define CONTROLLER_ID 0x8987
+// A0148987 ****************************** now full controller
+#define PROD_NAME  "A0148987 Re-Vamp"
+#define CONTROLLER_ID 0x8987
 
-// // A0148750 ****************************** messed up POT
+// // A0148750 ****************************** messed up POT (now just test plastics)
 // #define PROD_NAME  "A0148750 Re-Vamp"
 // #define CONTROLLER_ID 0x8750
 
-// // A0329340 ****************************** First S3 Controller POC (now full controller) (has Battery Mod)
+// // A0329340 ****************************** now full controller (First S3 Controller POC)
 // #define PROD_NAME  "A0329340 Re-Vamp"
 // #define CONTROLLER_ID 0x9340 
 
-// // A0148860 ****************************** First PCB S3 controller V5
+// // A0148860 ****************************** now full controller (First PCB S3 controller)
 // #define PROD_NAME  "A0148860 Re-Vamp"
 // #define CONTROLLER_ID 0x8860
 
-// // A0350786
+// // A0350786 ****************************** now full controller
 // #define PROD_NAME  "A0350786 Re-Vamp"
 // #define CONTROLLER_ID 0x0786
 
-// // A0243249
+// // A0243249 ****************************** now full controller
 // #define PROD_NAME  "A0243249 Re-Vamp"
 // #define CONTROLLER_ID 0x3249
 
-// // A0337517
+// // A0337517 ****************************** now full controller (Needed larger STARTING_BRAKE of 700 to get to -0.99)
 // #define PROD_NAME  "A0337517 Re-Vamp"
 // #define CONTROLLER_ID 0x7517
 
-// // A0337117
+// // A0337117 ****************************** now full controller
 // #define PROD_NAME  "A0337117 Re-Vamp"
 // #define CONTROLLER_ID 0x7117
 
