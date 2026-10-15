@@ -84,6 +84,15 @@ Notes for possible revisions
 #define PRINTOUTS           true
 #define WRTIE_REGISTRATION  false // write controller ID and other info into non-volitale memory (only need once to "register" it)
 #define VIB_DEFAULT         false // vibrator default to on/off (also saved to persistance memory!)
+#define VIB_INVERT          false // invert active low vs active high (Rev2+ moved to active high so it doesn't vibrate in boot/programming)
+
+#if VIB_INVERT
+	#define VIB_ON  LOW
+	#define VIB_OFF HIGH
+#else
+	#define VIB_ON  LOW
+	#define VIB_OFF HIGH
+#endif
 
 // BLE_Gamepad_Config
 #define NUM_BUTTONS      8 // do be able to natrually map BUTTON_BACK in Re-Volt. we only have 6 actual
@@ -262,9 +271,9 @@ Notes for possible revisions
 // #define PROD_NAME  "A0306712 Re-Vamp"
 // #define CONTROLLER_ID 0x6712
 
-// A0148987 ****************************** now full controller
-#define PROD_NAME  "A0148987 Re-Vamp"
-#define CONTROLLER_ID 0x8987
+// // A0148987 ****************************** now full controller
+// #define PROD_NAME  "A0148987 Re-Vamp"
+// #define CONTROLLER_ID 0x8987
 
 // // A0148750 ****************************** messed up POT (now just test plastics)
 // #define PROD_NAME  "A0148750 Re-Vamp"
@@ -491,7 +500,7 @@ void setup()
 	pinMode(PIN_BTM_BTN,   INPUT_PULLUP);
 	pinMode(PIN_VIBRATOR,  OUTPUT);
 
-	digitalWrite(PIN_VIBRATOR, HIGH); // turn off vibrator
+	digitalWrite(PIN_VIBRATOR, VIB_OFF); // turn off vibrator
 
 	// +==============================+
 	// |         Init Values          |
@@ -570,7 +579,7 @@ void setup()
 		VibEnabled = true;
 		// Activate Vibrator to indicate
 		VibCountdown = VIB_DURATION;
-		digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
+		digitalWrite(PIN_VIBRATOR, VIB_ON); // turn on vibrator
 		VibActivated = true;
 
 		#if PRINTOUTS
@@ -787,7 +796,7 @@ void loop()
 		if(VibEnabled)
 		{
 			VibCountdown = VIB_DURATION;
-			digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
+			digitalWrite(PIN_VIBRATOR, VIB_ON); // turn on vibrator
 			VibActivated = true;
 		}
 
@@ -910,7 +919,7 @@ void loop()
 	if(VibEnabled && newThumbBtn && VibCountdown == 0 && !VibActivated && !MenuMode)
 	{
 		VibCountdown = VIB_DURATION;
-		digitalWrite(PIN_VIBRATOR, HIGH); // turn on vibrator
+		digitalWrite(PIN_VIBRATOR, VIB_ON); // turn on vibrator
 		VibActivated = true;
 	}
 	else if(!newThumbBtn && VibCountdown == 0 && VibActivated)
@@ -919,7 +928,7 @@ void loop()
 	}
 	else if(digitalRead(PIN_VIBRATOR) && VibCountdown == 0)
 	{
-		digitalWrite(PIN_VIBRATOR, LOW); // turn off vibrator
+		digitalWrite(PIN_VIBRATOR, VIB_OFF); // turn off vibrator
 	}
 
 	// +--------------------------------------------------------------+
